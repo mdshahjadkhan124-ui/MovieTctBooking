@@ -22,6 +22,13 @@ export const errorHandler = (err, req, res, next) => {
     });
   }
 
+  if (err.name === "CastError") {
+    return res.status(400).json({
+      success: false,
+      error: { code: "VALIDATION_ERROR", message: `Invalid ${err.path}: ${err.value}` },
+    });
+  }
+
   console.error(err);
   res.status(500).json({
     success: false,
