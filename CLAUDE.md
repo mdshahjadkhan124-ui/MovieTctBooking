@@ -58,8 +58,8 @@ Exact schema shapes are finalized per-sprint in planning. Do not invent fields
 1. **Auth** (JWT, role-based middleware) — ✅ DONE
 2. **Movie / Theater / Screen / Showtime CRUD** (admin) + public listing API — ✅ DONE
 3. Seat layout + seat selection UI — ✅ DONE
-4. Seat recommendation engine — 🔜 CURRENT
-5. Seat locking + booking flow (concurrency-safe, Redis TTL keys)
+4. Seat recommendation engine — ✅ DONE
+5. Seat locking + booking flow (concurrency-safe, Redis TTL keys) — 🔜 CURRENT
 6. Payment integration (Stripe test mode) + booking confirmation
 7. Polish: search / filter, booking history, e-ticket with QR code
 8. Testing + deployment
