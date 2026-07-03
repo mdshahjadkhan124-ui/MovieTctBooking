@@ -59,10 +59,11 @@ Exact schema shapes are finalized per-sprint in planning. Do not invent fields
 2. **Movie / Theater / Screen / Showtime CRUD** (admin) + public listing API — ✅ DONE
 3. Seat layout + seat selection UI — ✅ DONE
 4. Seat recommendation engine — ✅ DONE
-5. Seat locking + booking flow (concurrency-safe, Redis TTL keys) — 🔜 CURRENT
-6. Payment integration (Stripe test mode) + booking confirmation
-7. Polish: search / filter, booking history, e-ticket with QR code
-8. Testing + deployment
+5. Seat locking (concurrency-safe, Redis TTL keys) — ✅ DONE
+6. Booking-commit flow (locks → Mongo Booking, concurrency-safe) — 🔜 CURRENT
+7. Payment integration (Stripe test mode) + booking confirmation
+8. Polish: search / filter, booking history, e-ticket with QR code
+9. Testing + deployment
 
 Only build the current sprint unless told otherwise. Don't scaffold future
 sprints ahead of time.
