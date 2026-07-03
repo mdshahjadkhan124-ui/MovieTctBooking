@@ -56,8 +56,8 @@ Exact schema shapes are finalized per-sprint in planning. Do not invent fields
 ## 4. Sprint Plan (source of truth for scope)
 
 1. **Auth** (JWT, role-based middleware) — ✅ DONE
-2. **Movie / Theater / Screen / Showtime CRUD** (admin) + public listing API — 🔜 CURRENT
-3. Seat layout + seat selection UI
+2. **Movie / Theater / Screen / Showtime CRUD** (admin) + public listing API — ✅ DONE
+3. Seat layout + seat selection UI — 🔜 CURRENT
 4. Seat recommendation engine
 5. Seat locking + booking flow (concurrency-safe, Redis TTL keys)
 6. Payment integration (Stripe test mode) + booking confirmation
