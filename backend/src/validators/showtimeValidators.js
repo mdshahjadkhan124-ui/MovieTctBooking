@@ -52,6 +52,32 @@ export const validateRecommendQuery = (req, res, next) => {
   next();
 };
 
+export const validateLockRequest = (req, res, next) => {
+  const { seatIds } = req.body;
+  if (
+    !Array.isArray(seatIds) ||
+    seatIds.length === 0 ||
+    !seatIds.every((id) => typeof id === "string" && id.trim().length > 0)
+  ) {
+    throw new AppError(
+      "seatIds must be a non-empty array of strings",
+      400,
+      "VALIDATION_ERROR"
+    );
+  }
+
+  next();
+};
+
+export const validateReleaseRequest = (req, res, next) => {
+  const { token } = req.body;
+  if (!token || typeof token !== "string") {
+    throw new AppError("token is required", 400, "VALIDATION_ERROR");
+  }
+
+  next();
+};
+
 export const validateUpdateShowtime = (req, res, next) => {
   const { movie, screen, startTime, endTime, price, format } = req.body;
 

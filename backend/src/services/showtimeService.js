@@ -6,6 +6,7 @@ import { AppError } from "../utils/AppError.js";
 import { assertTheaterAccess } from "../utils/assertTheaterAccess.js";
 import { buildSeatGrid } from "../utils/buildSeatGrid.js";
 import { recommendSeats } from "./seatRecommendation.js";
+import * as seatLockService from "./seatLockService.js";
 
 const assertNoOverlap = async (screenId, startTime, endTime, excludeId) => {
   const query = {
@@ -129,6 +130,36 @@ export const getShowtimeRecommendation = async (id, count) => {
   const grid = buildSeatGrid(showtime.screen.layout, new Set());
   return recommendSeats(grid, count);
 };
+
+export const lockSeats = async (showtimeId, seatIds, userId) => {
+  const showtime = await Showtime.findById(showtimeId).populate("screen");
+  if (!showtime || !showtime.isActive) {
+    throw new AppError("Showtime not found", 404, "NOT_FOUND");
+  }
+
+  // Reject bogus/typo'd seat ids or ones the layout itself marks unavailable
+  // before ever touching Redis — Redis locking is only meaningful for real,
+  // layout-available seats.
+  const grid = buildSeatGrid(showtime.screen.layout, new Set());
+  const validSeatIds = new Set(
+    grid.flat().filter((seat) => seat.status === "available").map((seat) => seat.id)
+  );
+  const invalidSeatIds = seatIds.filter((id) => !validSeatIds.has(id));
+  if (invalidSeatIds.length > 0) {
+    throw new AppError(
+      `Invalid or unavailable seat(s): ${invalidSeatIds.join(", ")}`,
+      400,
+      "INVALID_SEATS"
+    );
+  }
+
+  return seatLockService.acquireLocks(showtimeId, seatIds, userId);
+};
+
+export const releaseSeatLocks = (showtimeId, token) =>
+  seatLockService.releaseLocksByToken(showtimeId, token);
+
+export const getLockedSeats = (showtimeId) => seatLockService.getLockedSeatIds(showtimeId);
 
 export const listPublicShowtimes = async (filters = {}) => {
   const query = { isActive: true };

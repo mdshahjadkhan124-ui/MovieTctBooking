@@ -29,6 +29,43 @@ export const recommend = asyncHandler(async (req, res) => {
   });
 });
 
+export const lock = asyncHandler(async (req, res) => {
+  const { seatIds } = req.body;
+  const result = await showtimeService.lockSeats(
+    req.params.id,
+    seatIds,
+    req.user._id.toString()
+  );
+
+  if (!result.success) {
+    return res.status(409).json({
+      success: false,
+      error: {
+        code: "SEATS_UNAVAILABLE",
+        message: "Some seats are already locked",
+        unavailable: result.unavailable,
+      },
+    });
+  }
+
+  res.json({
+    success: true,
+    data: { token: result.token, expiresAt: result.expiresAt },
+    message: "",
+  });
+});
+
+export const releaseLock = asyncHandler(async (req, res) => {
+  const { token } = req.body;
+  const released = await showtimeService.releaseSeatLocks(req.params.id, token);
+  res.json({ success: true, data: { released }, message: "" });
+});
+
+export const lockStatus = asyncHandler(async (req, res) => {
+  const lockedSeatIds = await showtimeService.getLockedSeats(req.params.id);
+  res.json({ success: true, data: { lockedSeatIds }, message: "" });
+});
+
 export const listAdmin = asyncHandler(async (req, res) => {
   const { theater, movie } = req.query;
   const showtimes = await showtimeService.listShowtimesAdmin(req.user, {
