@@ -39,6 +39,19 @@ export const validateCreateShowtime = (req, res, next) => {
   next();
 };
 
+export const validateRecommendQuery = (req, res, next) => {
+  const count = Number(req.query.count);
+  if (!Number.isInteger(count) || count <= 0) {
+    throw new AppError(
+      "count must be a positive integer",
+      400,
+      "VALIDATION_ERROR"
+    );
+  }
+
+  next();
+};
+
 export const validateUpdateShowtime = (req, res, next) => {
   const { movie, screen, startTime, endTime, price, format } = req.body;
 

@@ -4,6 +4,8 @@ import { Showtime } from "../models/Showtime.js";
 import { Theater } from "../models/Theater.js";
 import { AppError } from "../utils/AppError.js";
 import { assertTheaterAccess } from "../utils/assertTheaterAccess.js";
+import { buildSeatGrid } from "../utils/buildSeatGrid.js";
+import { recommendSeats } from "./seatRecommendation.js";
 
 const assertNoOverlap = async (screenId, startTime, endTime, excludeId) => {
   const query = {
@@ -113,6 +115,19 @@ export const getPublicShowtimeById = async (id) => {
     throw new AppError("Showtime not found", 404, "NOT_FOUND");
   }
   return showtime;
+};
+
+export const getShowtimeRecommendation = async (id, count) => {
+  const showtime = await Showtime.findById(id).populate("screen");
+  if (!showtime || !showtime.isActive) {
+    throw new AppError("Showtime not found", 404, "NOT_FOUND");
+  }
+
+  // Real booked-seat data (Redis locks + confirmed bookings) arrives in
+  // Sprint 5; until then every showtime is treated as having zero booked
+  // seats — buildSeatGrid already accepts and honors that input.
+  const grid = buildSeatGrid(showtime.screen.layout, new Set());
+  return recommendSeats(grid, count);
 };
 
 export const listPublicShowtimes = async (filters = {}) => {

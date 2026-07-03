@@ -16,6 +16,19 @@ export const getPublic = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { showtime }, message: "" });
 });
 
+export const recommend = asyncHandler(async (req, res) => {
+  const count = Number(req.query.count);
+  const recommendation = await showtimeService.getShowtimeRecommendation(
+    req.params.id,
+    count
+  );
+  res.json({
+    success: true,
+    data: { recommendation },
+    message: recommendation ? "" : "No seats available for the requested count.",
+  });
+});
+
 export const listAdmin = asyncHandler(async (req, res) => {
   const { theater, movie } = req.query;
   const showtimes = await showtimeService.listShowtimesAdmin(req.user, {
