@@ -1,4 +1,4 @@
-const SelectionSummary = ({ selectedSeatIds, pricePerSeat, onProceed }) => {
+const SelectionSummary = ({ selectedSeatIds, pricePerSeat, onProceed, disabled, busy }) => {
   const count = selectedSeatIds.length;
   const total = count * (pricePerSeat ?? 0);
 
@@ -18,11 +18,11 @@ const SelectionSummary = ({ selectedSeatIds, pricePerSeat, onProceed }) => {
       </div>
       <button
         type="button"
-        disabled={count === 0}
+        disabled={count === 0 || disabled}
         onClick={onProceed}
         className="rounded-md bg-primary px-6 py-2 text-sm font-semibold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
       >
-        Proceed
+        {busy ? "Locking seats..." : "Proceed"}
       </button>
     </div>
   );

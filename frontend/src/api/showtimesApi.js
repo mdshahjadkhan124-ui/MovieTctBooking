@@ -7,7 +7,15 @@ export const showtimesApi = apiSlice.injectEndpoints({
       transformResponse: (response) => response.data.showtime,
       providesTags: (result, error, id) => [{ type: "Showtime", id }],
     }),
+    lockSeats: builder.mutation({
+      query: ({ showtimeId, seatIds }) => ({
+        url: `/showtimes/${showtimeId}/lock`,
+        method: "POST",
+        body: { seatIds },
+      }),
+      transformResponse: (response) => response.data,
+    }),
   }),
 });
 
-export const { useGetShowtimeByIdQuery } = showtimesApi;
+export const { useGetShowtimeByIdQuery, useLockSeatsMutation } = showtimesApi;
