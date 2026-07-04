@@ -185,5 +185,6 @@ export const listPublicShowtimes = async (filters = {}) => {
   return Showtime.find(query)
     .populate("movie")
     .populate("theater")
+    .populate("screen")
     .sort({ startTime: 1 });
 };

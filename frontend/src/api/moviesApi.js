@@ -12,7 +12,12 @@ export const moviesApi = apiSlice.injectEndpoints({
       transformResponse: (response) => response.data.movies,
       providesTags: ["Movie"],
     }),
+    getMovieById: builder.query({
+      query: (id) => `/movies/${id}`,
+      transformResponse: (response) => response.data.movie,
+      providesTags: (result, error, id) => [{ type: "Movie", id }],
+    }),
   }),
 });
 
-export const { useGetMoviesQuery } = moviesApi;
+export const { useGetMoviesQuery, useGetMovieByIdQuery } = moviesApi;

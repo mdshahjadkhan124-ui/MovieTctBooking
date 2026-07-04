@@ -1,4 +1,4 @@
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useGetMoviesQuery } from "../api/moviesApi.js";
 import { useGetTheatersQuery } from "../api/theatersApi.js";
 
@@ -124,28 +124,30 @@ const HomePage = () => {
               key={movie._id}
               className="overflow-hidden rounded-md bg-white shadow-sm ring-1 ring-gray-100"
             >
-              <div className="relative aspect-[2/3] bg-gray-100">
-                {movie.posterUrl ? (
-                  <img
-                    src={movie.posterUrl}
-                    alt={movie.title}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
-                    No poster
-                  </div>
-                )}
-                {typeof movie.rating === "number" && (
-                  <span className="absolute right-1.5 top-1.5 rounded-full bg-navy/90 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                    &#9733; {movie.rating}
-                  </span>
-                )}
-              </div>
-              <div className="p-3">
-                <p className="truncate font-medium text-gray-900">{movie.title}</p>
-                <p className="truncate text-xs text-gray-500">{movie.genres?.join(", ")}</p>
-              </div>
+              <Link to={`/movies/${movie._id}`} className="block">
+                <div className="relative aspect-[2/3] bg-gray-100">
+                  {movie.posterUrl ? (
+                    <img
+                      src={movie.posterUrl}
+                      alt={movie.title}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
+                      No poster
+                    </div>
+                  )}
+                  {typeof movie.rating === "number" && (
+                    <span className="absolute right-1.5 top-1.5 rounded-full bg-navy/90 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      &#9733; {movie.rating}
+                    </span>
+                  )}
+                </div>
+                <div className="p-3">
+                  <p className="truncate font-medium text-gray-900">{movie.title}</p>
+                  <p className="truncate text-xs text-gray-500">{movie.genres?.join(", ")}</p>
+                </div>
+              </Link>
             </li>
           ))}
         </ul>
