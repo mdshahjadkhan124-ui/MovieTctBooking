@@ -16,6 +16,14 @@ import { errorHandler, notFound } from "./middleware/errorHandler.js";
 
 const app = express();
 
+// In production the frontend origin must come from CLIENT_URL — falling
+// back to localhost would silently break CORS for the real deployed
+// frontend, so fail loudly at startup instead. The dev fallback keeps
+// `npm run dev` working without a .env entry.
+if (process.env.NODE_ENV === "production" && !process.env.CLIENT_URL) {
+  throw new Error("CLIENT_URL must be set in production for CORS");
+}
+
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:5173",
