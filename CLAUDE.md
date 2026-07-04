@@ -60,10 +60,9 @@ Exact schema shapes are finalized per-sprint in planning. Do not invent fields
 3. Seat layout + seat selection UI — ✅ DONE
 4. Seat recommendation engine — ✅ DONE
 5. Seat locking (concurrency-safe, Redis TTL keys) — ✅ DONE
-6. Booking-commit flow (locks → Mongo Booking, concurrency-safe) — 🔜 CURRENT
-7. Payment integration (Stripe test mode) + booking confirmation
-8. Polish: search / filter, booking history, e-ticket with QR code
-9. Testing + deployment
+6. Booking-commit flow (locks → Mongo Booking, concurrency-safe) + Stripe payment (test mode) + booking confirmation — ✅ DONE
+7. Polish: search / filter, booking history, e-ticket with QR code, wire `GET /locks` into the seat grid — 🔜 CURRENT
+8. Testing + deployment
 
 Only build the current sprint unless told otherwise. Don't scaffold future
 sprints ahead of time.
