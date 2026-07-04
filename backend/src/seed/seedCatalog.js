@@ -5,63 +5,45 @@ import { Movie } from "../models/Movie.js";
 import { Theater } from "../models/Theater.js";
 import { Screen } from "../models/Screen.js";
 import { Showtime } from "../models/Showtime.js";
+import * as showtimeService from "../services/showtimeService.js";
+import { getMovieForSeed } from "../services/tmdbService.js";
 
-const sampleMovies = [
-  {
-    title: "The Last Horizon",
-    description: "A crew ventures beyond the edge of known space.",
-    durationMinutes: 148,
-    genres: ["Sci-Fi", "Adventure"],
-    language: "English",
-    certification: "UA",
-    releaseDate: new Date("2026-01-10"),
-    rating: 8.1,
-    castList: ["Rhea Kapoor", "Vikram Sen"],
-  },
-  {
-    title: "Monsoon Wedding Blues",
-    description: "A chaotic wedding weekend in Jaipur.",
-    durationMinutes: 132,
-    genres: ["Comedy", "Drama"],
-    language: "Hindi",
-    certification: "U",
-    releaseDate: new Date("2026-02-14"),
-    rating: 7.4,
-    castList: ["Anaya Rao", "Dev Malhotra"],
-  },
-  {
-    title: "Steel City",
-    description: "A detective chases a syndicate through an industrial metropolis.",
-    durationMinutes: 121,
-    genres: ["Action", "Thriller"],
-    language: "English",
-    certification: "A",
-    releaseDate: new Date("2025-11-05"),
-    rating: 6.9,
-    castList: ["Marcus Lee", "Ines Duarte"],
-  },
-  {
-    title: "Silent Ember",
-    description: "A retired arson investigator is pulled into one last case.",
-    durationMinutes: 118,
-    genres: ["Drama", "Mystery"],
-    language: "English",
-    certification: "UA",
-    releaseDate: new Date("2026-03-01"),
-    rating: 7.8,
-    castList: ["Priya Nair", "Tom Ashcroft"],
-  },
-  {
-    title: "Dilli Nights",
-    description: "Four friends chase one impossible night across the capital.",
-    durationMinutes: 126,
-    genres: ["Comedy"],
-    language: "Hindi",
-    certification: "U",
-    releaseDate: new Date("2025-12-20"),
-    rating: 6.8,
-    castList: ["Kabir Sethi", "Naina Chopra"],
-  },
+// Old static demo titles being replaced by real TMDB data. Movies with real
+// bookings against them are deactivated instead of deleted (see below) —
+// this list is only the ones confirmed to have zero bookings.
+const RETIRED_DEMO_TITLES = [
+  "The Last Horizon",
+  "Monsoon Wedding Blues",
+  "Steel City",
+  "Dilli Nights",
+];
+
+// Had real bookings (including a confirmed one) against it at the time this
+// catalog was refreshed with TMDB data — deactivated rather than deleted so
+// those bookings/tickets keep resolving correctly.
+const DEACTIVATED_DEMO_TITLES = ["Silent Ember"];
+
+// A curated mix (not TMDB's "popular" list, which skews Hollywood/anime) so
+// the catalog reliably has both Bollywood and Hollywood titles.
+// A plain string is searched as-is; { title, year } disambiguates a title
+// that's too common on its own (e.g. "Queen" matches many unrelated films
+// across markets — the 2013 Kangana Ranaut film needs the release year).
+const TMDB_SEED_TITLES = [
+  "3 Idiots",
+  "Dangal",
+  "PK",
+  "Jawan",
+  "Gully Boy",
+  "Zindagi Na Milegi Dobara",
+  { title: "Queen", year: 2014 }, // TMDB records its release date as 2014-03-07, not 2013
+  "Andhadhun",
+  "Inception",
+  "The Dark Knight",
+  "Interstellar",
+  "Oppenheimer",
+  "The Shawshank Redemption",
+  "Avengers: Endgame",
+  "La La Land",
 ];
 
 const sampleTheaters = [
@@ -97,21 +79,46 @@ const STANDARD_LAYOUT = {
   unavailableSeats: [],
 };
 
-// Each theater screens two different movies from the pool at staggered
-// times, so the demo has real variety for search/filter rather than one
-// showtime each.
-const SHOWTIME_OFFSETS_HOURS = [3, 7];
+const SHOWTIMES_PER_MOVIE = 3;
+const DAY_OFFSETS = [1, 2, 3]; // upcoming days, not "now", so nothing looks stale
+const HOUR_SLOTS = [10, 13, 16, 19]; // typical showtimes: 10am/1pm/4pm/7pm
 
-const run = async () => {
-  await connectDB();
-
-  const movieDocs = [];
-  for (const m of sampleMovies) {
-    let movie = await Movie.findOne({ title: m.title });
-    if (!movie) movie = await Movie.create(m);
-    movieDocs.push(movie);
+const retireOldDemoMovies = async () => {
+  for (const title of RETIRED_DEMO_TITLES) {
+    const movie = await Movie.findOne({ title });
+    if (!movie) continue;
+    const showtimeIds = await Showtime.find({ movie: movie._id }).distinct("_id");
+    await Showtime.deleteMany({ _id: { $in: showtimeIds } });
+    await Movie.deleteOne({ _id: movie._id });
+    console.log(`Deleted "${title}" and its ${showtimeIds.length} showtime(s).`);
   }
 
+  for (const title of DEACTIVATED_DEMO_TITLES) {
+    const result = await Movie.findOneAndUpdate({ title }, { isActive: false });
+    if (result) console.log(`Deactivated "${title}" (kept — has real bookings against it).`);
+  }
+};
+
+const seedTmdbMovies = async () => {
+  const movieDocs = [];
+  for (const entry of TMDB_SEED_TITLES) {
+    const { title, year } = typeof entry === "string" ? { title: entry, year: undefined } : entry;
+
+    const existing = await Movie.findOne({ title: { $regex: `^${title}$`, $options: "i" } });
+    if (existing) {
+      movieDocs.push(existing);
+      continue;
+    }
+
+    const data = await getMovieForSeed(title, year);
+    const movie = await Movie.create(data);
+    movieDocs.push(movie);
+    console.log(`Fetched and saved "${movie.title}" from TMDB.`);
+  }
+  return movieDocs;
+};
+
+const seedTheatersAndScreens = async () => {
   const theaterDocs = [];
   for (const t of sampleTheaters) {
     let theater = await Theater.findOne({ name: t.name });
@@ -131,33 +138,70 @@ const run = async () => {
     }
     screenDocs.push(screen);
   }
+  return screenDocs;
+};
 
-  const now = new Date();
-  let created = 0;
-  for (let i = 0; i < screenDocs.length; i++) {
-    const screen = screenDocs[i];
-    for (let j = 0; j < SHOWTIME_OFFSETS_HOURS.length; j++) {
-      const movie = movieDocs[(i + j) % movieDocs.length];
-      const startTime = new Date(now.getTime() + SHOWTIME_OFFSETS_HOURS[j] * 60 * 60 * 1000);
-      const endTime = new Date(startTime.getTime() + movie.durationMinutes * 60 * 1000);
+// Uses the real admin showtimeService.createShowtime path (not a raw
+// Showtime.create) so the same overlap-per-screen rule that protects the
+// admin API also protects seed data — a synthetic super_admin bypasses the
+// theater-ownership check that only applies to theater_admin callers.
+const SEED_ADMIN_USER = { role: "super_admin" };
 
-      const existing = await Showtime.findOne({ screen: screen._id, movie: movie._id });
-      if (existing) continue;
+const createShowtimeWithRetry = async (movie, screen, dayOffset, hourSlotIndex) => {
+  for (let attempt = 0; attempt < HOUR_SLOTS.length; attempt++) {
+    const hour = HOUR_SLOTS[(hourSlotIndex + attempt) % HOUR_SLOTS.length];
+    const startTime = new Date();
+    startTime.setDate(startTime.getDate() + dayOffset);
+    startTime.setHours(hour, 0, 0, 0);
 
-      await Showtime.create({
-        movie: movie._id,
-        screen: screen._id,
-        theater: screen.theater,
-        startTime,
-        endTime,
+    try {
+      return await showtimeService.createShowtime(SEED_ADMIN_USER, {
+        movie: movie._id.toString(),
+        screen: screen._id.toString(),
+        startTime: startTime.toISOString(),
         price: 220,
         format: "2D",
         language: movie.language,
       });
-      created += 1;
+    } catch (err) {
+      if (err.code !== "SHOWTIME_OVERLAP") throw err;
+      // Slot taken — try the next hour on the same day before giving up.
     }
   }
-  console.log(`Seeded ${created} new showtime(s).`);
+  return null;
+};
+
+const seedShowtimesForMovies = async (movieDocs, screenDocs) => {
+  let created = 0;
+  let skippedExisting = 0;
+
+  for (let i = 0; i < movieDocs.length; i++) {
+    const movie = movieDocs[i];
+    const alreadyHasShowtimes = await Showtime.exists({ movie: movie._id });
+    if (alreadyHasShowtimes) {
+      skippedExisting += 1;
+      continue;
+    }
+
+    for (let j = 0; j < SHOWTIMES_PER_MOVIE; j++) {
+      const screen = screenDocs[(i + j) % screenDocs.length];
+      const dayOffset = DAY_OFFSETS[j % DAY_OFFSETS.length];
+      const hourSlotIndex = i % HOUR_SLOTS.length;
+      const showtime = await createShowtimeWithRetry(movie, screen, dayOffset, hourSlotIndex);
+      if (showtime) created += 1;
+    }
+  }
+
+  console.log(`Created ${created} new showtime(s); ${skippedExisting} movie(s) already had showtimes.`);
+};
+
+const run = async () => {
+  await connectDB();
+
+  await retireOldDemoMovies();
+  const movieDocs = await seedTmdbMovies();
+  const screenDocs = await seedTheatersAndScreens();
+  await seedShowtimesForMovies(movieDocs, screenDocs);
 
   console.log("Catalog seed complete.");
   await mongoose.disconnect();
