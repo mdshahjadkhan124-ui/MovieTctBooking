@@ -10,6 +10,8 @@ import adminMovieRoutes from "./routes/adminMovieRoutes.js";
 import adminTheaterRoutes from "./routes/adminTheaterRoutes.js";
 import adminScreenRoutes from "./routes/adminScreenRoutes.js";
 import adminShowtimeRoutes from "./routes/adminShowtimeRoutes.js";
+import bookingRoutes from "./routes/bookingRoutes.js";
+import webhookRoutes from "./routes/webhookRoutes.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 
 const app = express();
@@ -20,6 +22,12 @@ app.use(
     credentials: true,
   })
 );
+
+// Mounted before express.json() — the Stripe webhook needs the raw request
+// body for signature verification, and express.json() would consume/replace
+// it with a parsed object for every route registered after it.
+app.use("/api/webhooks", webhookRoutes);
+
 app.use(express.json());
 app.use(cookieParser());
 
@@ -36,6 +44,7 @@ app.use("/api/admin/movies", adminMovieRoutes);
 app.use("/api/admin/theaters", adminTheaterRoutes);
 app.use("/api/admin/screens", adminScreenRoutes);
 app.use("/api/admin/showtimes", adminShowtimeRoutes);
+app.use("/api/bookings", bookingRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -113,9 +113,8 @@ export const getLockedSeatIds = async (showtimeId) => {
 };
 
 /**
- * Seam for Sprint 6: booking-commit should call this to confirm the caller
- * still holds every seat it's about to book before persisting anything.
- * Not wired to a route this sprint.
+ * Booking-commit (Sprint 6) calls this to confirm the caller still holds
+ * every seat it's about to book, using the exact token from checkout time.
  */
 export const verifyLockOwnership = async (showtimeId, seatIds, token) => {
   const client = getRedisClient();
@@ -123,4 +122,26 @@ export const verifyLockOwnership = async (showtimeId, seatIds, token) => {
     seatIds.map((seatId) => client.get(lockKey(showtimeId, seatId)))
   );
   return values.every((value) => value === token);
+};
+
+/**
+ * Checkout (Sprint 6) doesn't receive the lock token from the client — the
+ * request body is just { showtimeId, seatIds }. This derives ownership
+ * directly from Redis state instead: every seat must currently be locked,
+ * all with the SAME token (proving they were locked together in one
+ * request), and that token's embedded userId must match the caller.
+ * Returns the shared token (to stash for a later exact-match re-check via
+ * verifyLockOwnership, e.g. at Stripe webhook time) or null if not owned.
+ */
+export const getOwnedLockToken = async (showtimeId, seatIds, userId) => {
+  const client = getRedisClient();
+  const values = await Promise.all(
+    seatIds.map((seatId) => client.get(lockKey(showtimeId, seatId)))
+  );
+
+  const prefix = `${userId}:`;
+  const allOwnedByUser = values.every((value) => value !== null && value.startsWith(prefix));
+  const allSameToken = values.every((value) => value === values[0]);
+
+  return allOwnedByUser && allSameToken ? values[0] : null;
 };
