@@ -15,7 +15,12 @@ export const showtimesApi = apiSlice.injectEndpoints({
       }),
       transformResponse: (response) => response.data,
     }),
+    getLockedSeats: builder.query({
+      query: (showtimeId) => `/showtimes/${showtimeId}/locks`,
+      transformResponse: (response) => response.data.lockedSeatIds,
+    }),
   }),
 });
 
-export const { useGetShowtimeByIdQuery, useLockSeatsMutation } = showtimesApi;
+export const { useGetShowtimeByIdQuery, useLockSeatsMutation, useGetLockedSeatsQuery } =
+  showtimesApi;

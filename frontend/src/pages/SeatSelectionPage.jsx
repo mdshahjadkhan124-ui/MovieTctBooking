@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { Elements } from "@stripe/react-stripe-js";
-import { useGetShowtimeByIdQuery, useLockSeatsMutation } from "../api/showtimesApi.js";
+import {
+  useGetShowtimeByIdQuery,
+  useLockSeatsMutation,
+  useGetLockedSeatsQuery,
+} from "../api/showtimesApi.js";
 import { useCheckoutMutation, useLazyGetBookingByIdQuery } from "../api/bookingsApi.js";
 import { stripePromise } from "../lib/stripe.js";
 import { buildSeatGrid } from "../utils/buildSeatGrid.js";
@@ -13,17 +17,19 @@ import Legend from "../features/seatSelection/components/Legend.jsx";
 import SelectionSummary from "../features/seatSelection/components/SelectionSummary.jsx";
 import CheckoutForm from "../features/seatSelection/components/CheckoutForm.jsx";
 
-// Real booked-seat data (Redis locks + confirmed bookings) arrives in Sprint 5;
-// until then every showtime is treated as having zero booked seats.
-const EMPTY_BOOKED_SEATS = new Set();
-
 const POLL_INTERVAL_MS = 1500;
 const POLL_MAX_ATTEMPTS = 10;
+const LOCK_REFRESH_INTERVAL_MS = 12000;
 
 const SeatSelectionPage = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
   const { data: showtime, isLoading, isError } = useGetShowtimeByIdQuery(id);
+  const { data: lockedSeatIds = [] } = useGetLockedSeatsQuery(id, {
+    pollingInterval: LOCK_REFRESH_INTERVAL_MS,
+    refetchOnFocus: true,
+    refetchOnReconnect: true,
+  });
   const selectedSeatIds = useSelector((state) => state.seatSelection.selectedSeatIds);
 
   const [lockSeats] = useLockSeatsMutation();
@@ -55,7 +61,13 @@ const SeatSelectionPage = () => {
     return <p className="px-8 py-24 text-center text-red-600">Could not load this showtime.</p>;
   }
 
-  const grid = buildSeatGrid(showtime.screen?.layout, EMPTY_BOOKED_SEATS);
+  // Seats locked by other users render as "booked" (unavailable); a seat the
+  // current user has selected themselves — including once they've locked it
+  // at checkout — is excluded here so it keeps rendering as their selection.
+  const lockedByOthers = new Set(
+    lockedSeatIds.filter((seatId) => !selectedSeatIds.includes(seatId))
+  );
+  const grid = buildSeatGrid(showtime.screen?.layout, lockedByOthers);
 
   const handleToggleSeat = (seat) => {
     if (checkoutState !== "idle") return; // seats are locked in once checkout has started

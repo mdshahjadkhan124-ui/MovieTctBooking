@@ -14,7 +14,7 @@ const categoryForRow = (rowLetter, seatCategories) => {
  * side effects — independently unit-testable.
  *
  * @param {{ rows: number, columns: number, seatCategories?: Array<{category: string, rows: string[]}>, unavailableSeats?: string[] }} layout
- * @param {Set<string>} bookedSeats - real booked-seat data arrives in Sprint 5; defaults to empty.
+ * @param {Set<string>} bookedSeats - seats locked by other users or already booked; defaults to empty.
  * @returns {Array<Array<{ id: string, row: string, col: number, category: string, status: 'available'|'unavailable'|'booked' }>>}
  */
 export const buildSeatGrid = (layout, bookedSeats = new Set()) => {
