@@ -58,11 +58,18 @@ export const createCheckout = async (userId, showtimeId, seatIds) => {
   return { clientSecret: paymentIntent.client_secret, bookingId: booking._id };
 };
 
+// Bookings only store refs (showtime, theater) — history/ticket views need
+// the movie title and screen name, so both read paths populate the same way.
+const BOOKING_POPULATE = [
+  { path: "showtime", populate: [{ path: "movie" }, { path: "screen" }] },
+  { path: "theater" },
+];
+
 export const listUserBookings = (userId) =>
-  Booking.find({ user: userId }).sort({ createdAt: -1 });
+  Booking.find({ user: userId }).sort({ createdAt: -1 }).populate(BOOKING_POPULATE);
 
 export const getBookingById = async (userId, bookingId) => {
-  const booking = await Booking.findById(bookingId);
+  const booking = await Booking.findById(bookingId).populate(BOOKING_POPULATE);
   if (!booking) throw new AppError("Booking not found", 404, "NOT_FOUND");
   if (booking.user.toString() !== userId) {
     throw new AppError("Not authorized to view this booking", 403, "FORBIDDEN");

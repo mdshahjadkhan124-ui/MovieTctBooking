@@ -9,12 +9,24 @@ export const bookingsApi = apiSlice.injectEndpoints({
         body: { showtimeId, seatIds },
       }),
       transformResponse: (response) => response.data,
+      invalidatesTags: ["Booking"],
     }),
     getBookingById: builder.query({
       query: (id) => `/bookings/${id}`,
       transformResponse: (response) => response.data.booking,
+      providesTags: (result, error, id) => [{ type: "Booking", id }],
+    }),
+    getMyBookings: builder.query({
+      query: () => "/bookings/me",
+      transformResponse: (response) => response.data.bookings,
+      providesTags: ["Booking"],
     }),
   }),
 });
 
-export const { useCheckoutMutation, useLazyGetBookingByIdQuery } = bookingsApi;
+export const {
+  useCheckoutMutation,
+  useLazyGetBookingByIdQuery,
+  useGetBookingByIdQuery,
+  useGetMyBookingsQuery,
+} = bookingsApi;
