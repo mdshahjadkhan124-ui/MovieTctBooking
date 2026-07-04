@@ -2,8 +2,8 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import * as movieService from "../services/movieService.js";
 
 export const listPublic = asyncHandler(async (req, res) => {
-  const { city, language, genre } = req.query;
-  const movies = await movieService.listMovies({ city, language, genre });
+  const { city, language, genre, search } = req.query;
+  const movies = await movieService.listMovies({ city, language, genre, search });
   res.json({ success: true, data: { movies }, message: "" });
 });
 

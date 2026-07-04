@@ -32,6 +32,12 @@ export const listMovies = async (filters = {}, { includeInactive = false } = {})
   if (!includeInactive) query.isActive = true;
   if (filters.language) query.language = filters.language;
   if (filters.genre) query.genres = filters.genre;
+  if (filters.search) {
+    // Escape regex metacharacters so a title search can't be used to inject
+    // an arbitrary pattern (e.g. a ReDoS-prone or always-true regex).
+    const escaped = filters.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    query.title = { $regex: escaped, $options: "i" };
+  }
 
   if (filters.city) {
     // Movie has no city field of its own — "movies in city X" means movies
