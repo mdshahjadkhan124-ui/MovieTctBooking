@@ -9,6 +9,7 @@ import { buildSeatGrid } from "../utils/buildSeatGrid.js";
 import { recommendSeats } from "./seatRecommendation.js";
 import * as seatLockService from "./seatLockService.js";
 import { emitSeatsUpdated } from "../config/socket.js";
+import { calculateSeatPrice } from "./pricingService.js";
 
 const getConfirmedBookedSeatIds = async (showtimeId) => {
   const bookings = await Booking.find({ showtime: showtimeId, status: "confirmed" }).select(
@@ -197,6 +198,35 @@ export const releaseSeatLocks = async (showtimeId, token) => {
 };
 
 export const getLockedSeats = (showtimeId) => getUnavailableSeatIds(showtimeId);
+
+/**
+ * Live per-seat pricing for a showtime: every seat in the layout, priced
+ * against the CURRENT occupancy at request time — this is why it's computed
+ * fresh per request rather than cached/stored, occupancy shifts as seats
+ * sell. Purely informational for display; checkout (bookingService) recomputes
+ * this independently server-side rather than trusting whatever the client
+ * last saw here.
+ */
+export const getSeatPricing = async (showtimeId) => {
+  const showtime = await Showtime.findById(showtimeId).populate("screen");
+  if (!showtime || !showtime.isActive) {
+    throw new AppError("Showtime not found", 404, "NOT_FOUND");
+  }
+  if (typeof showtime.price !== "number" || showtime.price <= 0) {
+    throw new AppError("This showtime has no price set", 400, "NO_PRICE");
+  }
+
+  const allSeats = buildSeatGrid(showtime.screen.layout).flat();
+  const unavailableSeatIds = await getUnavailableSeatIds(showtimeId);
+  const occupancy = allSeats.length > 0 ? unavailableSeatIds.length / allSeats.length : 0;
+
+  const seatPrices = allSeats.map((seat) => {
+    const { finalPrice, breakdown } = calculateSeatPrice(showtime.price, seat, showtime, occupancy);
+    return { seatId: seat.id, category: seat.category, finalPrice, breakdown };
+  });
+
+  return { basePrice: showtime.price, occupancy, seatPrices };
+};
 
 export const listPublicShowtimes = async (filters = {}) => {
   const query = { isActive: true };

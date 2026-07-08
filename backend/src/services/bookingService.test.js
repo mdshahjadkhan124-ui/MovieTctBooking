@@ -13,6 +13,9 @@ import { Screen } from "../models/Screen.js";
 import { Showtime } from "../models/Showtime.js";
 import * as seatLockService from "./seatLockService.js";
 import * as bookingService from "./bookingService.js";
+import { getUnavailableSeatIds } from "./showtimeService.js";
+import { calculateSeatPrice } from "./pricingService.js";
+import { buildSeatGrid } from "../utils/buildSeatGrid.js";
 
 let server;
 let baseUrl;
@@ -236,4 +239,33 @@ describe("booking checkout + Stripe webhook", () => {
     const updated = await Booking.findById(bookingId);
     expect(updated.status).toBe("failed");
   }, 20000);
+
+  it("checkout computes price server-side, independent of anything a client could send", async () => {
+    const seatIds = ["C1"];
+    await seatLockService.acquireLocks(showtime._id.toString(), seatIds, userId);
+
+    // createCheckout's signature is (userId, showtimeId, seatIds) — there is
+    // no price parameter to smuggle a client-sent value through even if
+    // bookingController.checkout didn't already ignore one (it only ever
+    // destructures showtimeId/seatIds off req.body). This proves the amount
+    // actually stored matches pricingService's own independent math for the
+    // live occupancy at the time, not an arbitrary/attacker-supplied number.
+    const { bookingId, amount } = await bookingService.createCheckout(
+      userId,
+      showtime._id.toString(),
+      seatIds
+    );
+
+    const booking = await Booking.findById(bookingId);
+    expect(booking.amount).toBe(amount);
+
+    const populatedShowtime = await Showtime.findById(showtime._id).populate("screen");
+    const grid = buildSeatGrid(populatedShowtime.screen.layout).flat();
+    const seat = grid.find((s) => s.id === "C1");
+    const unavailableSeatIds = await getUnavailableSeatIds(showtime._id.toString());
+    const occupancy = unavailableSeatIds.length / grid.length;
+    const expected = calculateSeatPrice(populatedShowtime.price, seat, populatedShowtime, occupancy);
+
+    expect(booking.amount).toBe(expected.finalPrice);
+  });
 });

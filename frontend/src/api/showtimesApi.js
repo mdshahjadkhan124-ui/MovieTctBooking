@@ -24,6 +24,10 @@ export const showtimesApi = apiSlice.injectEndpoints({
       transformResponse: (response) => response.data.showtimes,
       providesTags: (result, error, movieId) => [{ type: "Showtime", id: `movie-${movieId}` }],
     }),
+    getSeatPricing: builder.query({
+      query: (showtimeId) => `/showtimes/${showtimeId}/pricing`,
+      transformResponse: (response) => response.data,
+    }),
   }),
 });
 
@@ -32,4 +36,5 @@ export const {
   useLockSeatsMutation,
   useGetLockedSeatsQuery,
   useGetShowtimesByMovieQuery,
+  useGetSeatPricingQuery,
 } = showtimesApi;

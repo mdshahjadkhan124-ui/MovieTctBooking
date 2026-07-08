@@ -5,9 +5,34 @@ import { stripe } from "../config/stripe.js";
 import * as seatLockService from "./seatLockService.js";
 import { getUnavailableSeatIds } from "./showtimeService.js";
 import { emitSeatsUpdated } from "../config/socket.js";
+import { buildSeatGrid } from "../utils/buildSeatGrid.js";
+import { calculateSeatPrice } from "./pricingService.js";
+
+// The one place checkout amount gets decided — recomputed fresh from
+// current occupancy every time, independent of whatever the client last
+// displayed. There is no `price` field anywhere in the checkout request
+// body (validateCheckoutRequest only looks at showtimeId/seatIds), so a
+// client-sent price isn't rejected so much as structurally never read.
+const priceSelectedSeats = async (showtime, seatIds) => {
+  const seatsById = new Map(buildSeatGrid(showtime.screen.layout).flat().map((s) => [s.id, s]));
+  const unavailableSeatIds = await getUnavailableSeatIds(showtime._id.toString());
+  const totalSeats = seatsById.size;
+  const occupancy = totalSeats > 0 ? unavailableSeatIds.length / totalSeats : 0;
+
+  let amount = 0;
+  const priceBreakdown = [];
+  for (const seatId of seatIds) {
+    const seat = seatsById.get(seatId);
+    if (!seat) throw new AppError(`Unknown seat: ${seatId}`, 400, "INVALID_SEATS");
+    const { finalPrice, breakdown } = calculateSeatPrice(showtime.price, seat, showtime, occupancy);
+    amount += finalPrice;
+    priceBreakdown.push({ seatId, finalPrice, breakdown });
+  }
+  return { amount, priceBreakdown };
+};
 
 export const createCheckout = async (userId, showtimeId, seatIds) => {
-  const showtime = await Showtime.findById(showtimeId);
+  const showtime = await Showtime.findById(showtimeId).populate("screen");
   if (!showtime || !showtime.isActive) {
     throw new AppError("Showtime not found", 404, "NOT_FOUND");
   }
@@ -26,7 +51,7 @@ export const createCheckout = async (userId, showtimeId, seatIds) => {
     );
   }
 
-  const amount = showtime.price * seatIds.length;
+  const { amount, priceBreakdown } = await priceSelectedSeats(showtime, seatIds);
 
   // Stripe amounts are in the smallest currency unit (paise for INR).
   // payment_method_types is pinned to "card" (rather than Stripe's automatic
@@ -57,7 +82,12 @@ export const createCheckout = async (userId, showtimeId, seatIds) => {
     paymentIntentId: paymentIntent.id,
   });
 
-  return { clientSecret: paymentIntent.client_secret, bookingId: booking._id };
+  return {
+    clientSecret: paymentIntent.client_secret,
+    bookingId: booking._id,
+    amount,
+    priceBreakdown,
+  };
 };
 
 // Bookings only store refs (showtime, theater) — history/ticket views need

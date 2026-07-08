@@ -29,6 +29,11 @@ export const recommend = asyncHandler(async (req, res) => {
   });
 });
 
+export const pricing = asyncHandler(async (req, res) => {
+  const result = await showtimeService.getSeatPricing(req.params.id);
+  res.json({ success: true, data: result, message: "" });
+});
+
 export const lock = asyncHandler(async (req, res) => {
   const { seatIds } = req.body;
   const result = await showtimeService.lockSeats(

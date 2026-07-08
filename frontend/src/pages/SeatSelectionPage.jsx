@@ -6,6 +6,7 @@ import {
   useGetShowtimeByIdQuery,
   useLockSeatsMutation,
   useGetLockedSeatsQuery,
+  useGetSeatPricingQuery,
 } from "../api/showtimesApi.js";
 import { useCheckoutMutation, useLazyGetBookingByIdQuery } from "../api/bookingsApi.js";
 import { stripePromise } from "../lib/stripe.js";
@@ -47,6 +48,15 @@ const SeatSelectionPage = () => {
 
   const selectedSeatIds = useSelector((state) => state.seatSelection.selectedSeatIds);
 
+  // Dynamic pricing — recomputed server-side on every request from live
+  // occupancy, so it's just a query (no polling needed: it's fresh on every
+  // page load, and checkout always recomputes it again authoritatively
+  // regardless of what's shown here).
+  const { data: pricing } = useGetSeatPricingQuery(id);
+  const seatPricesById = Object.fromEntries(
+    (pricing?.seatPrices ?? []).map((sp) => [sp.seatId, sp])
+  );
+
   const [lockSeats] = useLockSeatsMutation();
   const [checkout] = useCheckoutMutation();
   const [fetchBooking] = useLazyGetBookingByIdQuery();
@@ -56,6 +66,8 @@ const SeatSelectionPage = () => {
   const [checkoutError, setCheckoutError] = useState("");
   const [clientSecret, setClientSecret] = useState(null);
   const [bookingId, setBookingId] = useState(null);
+  const [chargeAmount, setChargeAmount] = useState(null);
+  const [priceNotice, setPriceNotice] = useState("");
   const pollTimeoutRef = useRef(null);
 
   useEffect(() => {
@@ -64,6 +76,8 @@ const SeatSelectionPage = () => {
     setCheckoutError("");
     setClientSecret(null);
     setBookingId(null);
+    setChargeAmount(null);
+    setPriceNotice("");
   }, [id, dispatch]);
 
   useEffect(() => () => clearTimeout(pollTimeoutRef.current), []);
@@ -117,6 +131,18 @@ const SeatSelectionPage = () => {
   );
   const grid = buildSeatGrid(showtime.screen?.layout, lockedByOthers);
 
+  // Per-seat prices only differ by position (occupancy/time are the same
+  // for every seat right now), so distinct position labels are exactly the
+  // distinct prices — a compact legend instead of a price on every tiny
+  // seat button.
+  const categoryPriceEntries = Object.values(
+    (pricing?.seatPrices ?? []).reduce((acc, sp) => {
+      const key = sp.breakdown.position.label;
+      if (!acc[key]) acc[key] = { label: key, finalPrice: sp.finalPrice };
+      return acc;
+    }, {})
+  );
+
   const handleToggleSeat = (seat) => {
     if (checkoutState !== "idle") return; // seats are locked in once checkout has started
     dispatch(toggleSeat({ id: seat.id, status: seat.status }));
@@ -144,12 +170,30 @@ const SeatSelectionPage = () => {
 
   const handleProceed = async () => {
     setCheckoutError("");
+    setPriceNotice("");
     setCheckoutState("locking");
     try {
       await lockSeats({ showtimeId: id, seatIds: selectedSeatIds }).unwrap();
       const result = await checkout({ showtimeId: id, seatIds: selectedSeatIds }).unwrap();
+
+      // The server recomputes price independently of anything shown here —
+      // occupancy can shift between "seat selected" and "checkout submitted"
+      // (someone else bought seats in between). If the authoritative amount
+      // differs from what the user was just looking at, say so plainly
+      // rather than silently charging a different number.
+      const displayedTotal = selectedSeatIds.reduce(
+        (sum, seatId) => sum + (seatPricesById[seatId]?.finalPrice ?? 0),
+        0
+      );
+      if (result.amount !== displayedTotal) {
+        setPriceNotice(
+          `Price updated to ₹${result.amount} based on current demand (was ₹${displayedTotal}).`
+        );
+      }
+
       setClientSecret(result.clientSecret);
       setBookingId(result.bookingId);
+      setChargeAmount(result.amount);
       setCheckoutState("awaiting_payment");
     } catch (err) {
       const message =
@@ -176,6 +220,8 @@ const SeatSelectionPage = () => {
     setCheckoutError("");
     setClientSecret(null);
     setBookingId(null);
+    setChargeAmount(null);
+    setPriceNotice("");
     setCheckoutState("idle");
   };
 
@@ -193,6 +239,19 @@ const SeatSelectionPage = () => {
       <SeatGrid grid={grid} selectedSeatIds={selectedSeatIds} onToggleSeat={handleToggleSeat} />
       <Legend />
 
+      {pricing && (
+        <div className="flex flex-wrap items-center justify-center gap-2 border-t border-gray-100 px-4 py-3 text-xs text-gray-600">
+          <span className="font-medium text-gray-500">
+            Demand: {Math.round(pricing.occupancy * 100)}% booked
+          </span>
+          {categoryPriceEntries.map(({ label, finalPrice }) => (
+            <span key={label} className="rounded-full bg-surface px-2.5 py-1">
+              {label}: &#8377;{finalPrice}
+            </span>
+          ))}
+        </div>
+      )}
+
       <p className="flex items-center justify-center gap-1.5 pb-4 text-xs text-gray-400">
         <span
           className={`h-1.5 w-1.5 rounded-full ${isSocketConnected ? "bg-green-500" : "bg-gray-300"}`}
@@ -202,6 +261,14 @@ const SeatSelectionPage = () => {
 
       {checkoutState === "awaiting_payment" && clientSecret && (
         <div className="px-4 py-4">
+          {priceNotice && (
+            <p className="mb-3 rounded-md bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
+              {priceNotice}
+            </p>
+          )}
+          <p className="mb-3 text-center text-sm text-gray-600">
+            You'll be charged <span className="font-semibold">&#8377;{chargeAmount}</span>
+          </p>
           <Elements stripe={stripePromise}>
             <CheckoutForm
               clientSecret={clientSecret}
@@ -219,6 +286,7 @@ const SeatSelectionPage = () => {
       {checkoutState === "success" && (
         <p className="px-4 py-4 text-center text-sm font-medium text-green-600">
           Booking confirmed! Seats: {selectedSeatIds.join(", ")}
+          {chargeAmount != null && <> &middot; &#8377;{chargeAmount}</>}
         </p>
       )}
 
@@ -238,7 +306,7 @@ const SeatSelectionPage = () => {
       {checkoutState !== "success" && (
         <SelectionSummary
           selectedSeatIds={selectedSeatIds}
-          pricePerSeat={showtime.price}
+          seatPricesById={seatPricesById}
           onProceed={handleProceed}
           disabled={checkoutState !== "idle"}
           busy={checkoutState === "locking"}

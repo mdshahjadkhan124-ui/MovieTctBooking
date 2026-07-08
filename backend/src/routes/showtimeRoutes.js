@@ -12,6 +12,7 @@ const router = Router();
 router.get("/", showtimeController.listPublic);
 router.get("/:id", showtimeController.getPublic);
 router.get("/:id/recommend", validateRecommendQuery, showtimeController.recommend);
+router.get("/:id/pricing", showtimeController.pricing);
 router.get("/:id/locks", showtimeController.lockStatus);
 router.post("/:id/lock", protect, validateLockRequest, showtimeController.lock);
 router.delete("/:id/lock", protect, validateReleaseRequest, showtimeController.releaseLock);
