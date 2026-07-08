@@ -18,6 +18,7 @@ import AdminScreensPage from "./admin/pages/AdminScreensPage.jsx";
 import AdminScreenFormPage from "./admin/pages/AdminScreenFormPage.jsx";
 import AdminShowtimesPage from "./admin/pages/AdminShowtimesPage.jsx";
 import AdminShowtimeFormPage from "./admin/pages/AdminShowtimeFormPage.jsx";
+import AdminAnalyticsPage from "./admin/pages/AdminAnalyticsPage.jsx";
 
 const App = () => {
   return (
@@ -49,6 +50,7 @@ const App = () => {
           <Route path="showtimes" element={<AdminShowtimesPage />} />
           <Route path="showtimes/new" element={<AdminShowtimeFormPage />} />
           <Route path="showtimes/:id/edit" element={<AdminShowtimeFormPage />} />
+          <Route path="analytics" element={<AdminAnalyticsPage />} />
         </Route>
       </Route>
     </Routes>

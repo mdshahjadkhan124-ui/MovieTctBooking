@@ -28,5 +28,8 @@ const showtimeSchema = new mongoose.Schema(
 );
 
 showtimeSchema.index({ screen: 1, startTime: 1 });
+// analyticsService's occupancy pipeline scopes Showtime by theater for a
+// theater_admin's role-scoped view.
+showtimeSchema.index({ theater: 1 });
 
 export const Showtime = mongoose.model("Showtime", showtimeSchema);

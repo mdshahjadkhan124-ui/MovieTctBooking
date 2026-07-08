@@ -27,5 +27,9 @@ const bookingSchema = new mongoose.Schema(
 );
 
 bookingSchema.index({ user: 1 });
+// Every analyticsService pipeline either scopes by theater, filters by
+// status, or both (revenue/cancellation-rate/top-movies/peak-times/
+// theater-performance) — one compound index serves all of them.
+bookingSchema.index({ theater: 1, status: 1 });
 
 export const Booking = mongoose.model("Booking", bookingSchema);

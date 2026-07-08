@@ -6,6 +6,7 @@ const NAV_LINKS = [
   { to: "/admin/theaters", label: "Theaters" },
   { to: "/admin/screens", label: "Screens" },
   { to: "/admin/showtimes", label: "Showtimes" },
+  { to: "/admin/analytics", label: "Analytics" },
 ];
 
 const navLinkClass = ({ isActive }) =>
