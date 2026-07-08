@@ -3,6 +3,7 @@ import { Showtime } from "../models/Showtime.js";
 import { AppError } from "../utils/AppError.js";
 import { stripe } from "../config/stripe.js";
 import * as seatLockService from "./seatLockService.js";
+import { getUnavailableSeatIds } from "./showtimeService.js";
 import { emitSeatsUpdated } from "../config/socket.js";
 
 export const createCheckout = async (userId, showtimeId, seatIds) => {
@@ -105,14 +106,11 @@ const handlePaymentSucceeded = async (paymentIntent) => {
   if (intendedStatus === "confirmed") {
     const showtimeId = booking.showtime.toString();
     await seatLockService.releaseLocksByToken(showtimeId, token);
-    // Broadcasts the post-release lock list so anyone else viewing this
-    // showtime sees these seats free up from "locked" instantly. Note this
-    // reflects Redis lock state only, not confirmed-booking state — there's
-    // no separate "permanently sold" seat tracking yet (pre-existing gap,
-    // not introduced here), so a booked seat currently shows as available
-    // again once its lock is released rather than staying unavailable.
-    const lockedSeatIds = await seatLockService.getLockedSeatIds(showtimeId);
-    emitSeatsUpdated(showtimeId, lockedSeatIds);
+    // The lock is gone from Redis now, but getUnavailableSeatIds re-includes
+    // these seats via the Booking we just confirmed above — so the broadcast
+    // still shows them unavailable, permanently, not just until the lock
+    // would have expired.
+    emitSeatsUpdated(showtimeId, await getUnavailableSeatIds(showtimeId));
   } else {
     await stripe.refunds.create({ payment_intent: paymentIntent.id });
   }

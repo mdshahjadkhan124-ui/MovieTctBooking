@@ -2,12 +2,36 @@ import { Movie } from "../models/Movie.js";
 import { Screen } from "../models/Screen.js";
 import { Showtime } from "../models/Showtime.js";
 import { Theater } from "../models/Theater.js";
+import { Booking } from "../models/Booking.js";
 import { AppError } from "../utils/AppError.js";
 import { assertTheaterAccess } from "../utils/assertTheaterAccess.js";
 import { buildSeatGrid } from "../utils/buildSeatGrid.js";
 import { recommendSeats } from "./seatRecommendation.js";
 import * as seatLockService from "./seatLockService.js";
 import { emitSeatsUpdated } from "../config/socket.js";
+
+const getConfirmedBookedSeatIds = async (showtimeId) => {
+  const bookings = await Booking.find({ showtime: showtimeId, status: "confirmed" }).select(
+    "seatIds"
+  );
+  return bookings.flatMap((booking) => booking.seatIds);
+};
+
+/**
+ * The seat grid's real "unavailable" set for a showtime — active Redis
+ * locks (temporary holds) union'd with confirmed bookings (permanent).
+ * A lock is released once a booking confirms (see bookingService), so
+ * Redis alone can't answer "is this seat gone forever" — this is the one
+ * place that combines both, used for the /locks response, the emitted
+ * seatsUpdated payload, and lockSeats' own pre-lock validation.
+ */
+export const getUnavailableSeatIds = async (showtimeId) => {
+  const [lockedSeatIds, bookedSeatIds] = await Promise.all([
+    seatLockService.getLockedSeatIds(showtimeId),
+    getConfirmedBookedSeatIds(showtimeId),
+  ]);
+  return Array.from(new Set([...lockedSeatIds, ...bookedSeatIds]));
+};
 
 const assertNoOverlap = async (screenId, startTime, endTime, excludeId) => {
   const query = {
@@ -125,10 +149,8 @@ export const getShowtimeRecommendation = async (id, count) => {
     throw new AppError("Showtime not found", 404, "NOT_FOUND");
   }
 
-  // Real booked-seat data (Redis locks + confirmed bookings) arrives in
-  // Sprint 5; until then every showtime is treated as having zero booked
-  // seats — buildSeatGrid already accepts and honors that input.
-  const grid = buildSeatGrid(showtime.screen.layout, new Set());
+  const unavailableSeatIds = await getUnavailableSeatIds(id);
+  const grid = buildSeatGrid(showtime.screen.layout, new Set(unavailableSeatIds));
   return recommendSeats(grid, count);
 };
 
@@ -138,10 +160,14 @@ export const lockSeats = async (showtimeId, seatIds, userId) => {
     throw new AppError("Showtime not found", 404, "NOT_FOUND");
   }
 
-  // Reject bogus/typo'd seat ids or ones the layout itself marks unavailable
-  // before ever touching Redis — Redis locking is only meaningful for real,
-  // layout-available seats.
-  const grid = buildSeatGrid(showtime.screen.layout, new Set());
+  // Reject bogus/typo'd seat ids, ones the layout itself marks unavailable,
+  // ones already locked by someone else, or ones already confirmed-booked —
+  // Redis locking is only meaningful for genuinely free, real seats. (Redis's
+  // own atomic SET NX already prevents two locks on the same seat; this
+  // upfront check additionally catches the confirmed-booking case, which
+  // Redis has no record of once that booking's lock was released.)
+  const unavailableSeatIds = await getUnavailableSeatIds(showtimeId);
+  const grid = buildSeatGrid(showtime.screen.layout, new Set(unavailableSeatIds));
   const validSeatIds = new Set(
     grid.flat().filter((seat) => seat.status === "available").map((seat) => seat.id)
   );
@@ -159,20 +185,18 @@ export const lockSeats = async (showtimeId, seatIds, userId) => {
     // Broadcast is a side effect of a successful lock, not a dependency of
     // it — emitSeatsUpdated never throws, so a socket outage can't fail a
     // real lock acquisition.
-    const lockedSeatIds = await seatLockService.getLockedSeatIds(showtimeId);
-    emitSeatsUpdated(showtimeId, lockedSeatIds);
+    emitSeatsUpdated(showtimeId, await getUnavailableSeatIds(showtimeId));
   }
   return result;
 };
 
 export const releaseSeatLocks = async (showtimeId, token) => {
   const released = await seatLockService.releaseLocksByToken(showtimeId, token);
-  const lockedSeatIds = await seatLockService.getLockedSeatIds(showtimeId);
-  emitSeatsUpdated(showtimeId, lockedSeatIds);
+  emitSeatsUpdated(showtimeId, await getUnavailableSeatIds(showtimeId));
   return released;
 };
 
-export const getLockedSeats = (showtimeId) => seatLockService.getLockedSeatIds(showtimeId);
+export const getLockedSeats = (showtimeId) => getUnavailableSeatIds(showtimeId);
 
 export const listPublicShowtimes = async (filters = {}) => {
   const query = { isActive: true };
