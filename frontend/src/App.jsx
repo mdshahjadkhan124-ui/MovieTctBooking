@@ -12,6 +12,10 @@ import AdminRoute from "./admin/AdminRoute.jsx";
 import AdminLayout from "./admin/AdminLayout.jsx";
 import AdminMoviesPage from "./admin/pages/AdminMoviesPage.jsx";
 import AdminMovieFormPage from "./admin/pages/AdminMovieFormPage.jsx";
+import AdminTheatersPage from "./admin/pages/AdminTheatersPage.jsx";
+import AdminTheaterFormPage from "./admin/pages/AdminTheaterFormPage.jsx";
+import AdminScreensPage from "./admin/pages/AdminScreensPage.jsx";
+import AdminScreenFormPage from "./admin/pages/AdminScreenFormPage.jsx";
 import AdminPlaceholderPage from "./admin/pages/AdminPlaceholderPage.jsx";
 
 const App = () => {
@@ -35,8 +39,12 @@ const App = () => {
           <Route path="movies" element={<AdminMoviesPage />} />
           <Route path="movies/new" element={<AdminMovieFormPage />} />
           <Route path="movies/:id/edit" element={<AdminMovieFormPage />} />
-          <Route path="theaters" element={<AdminPlaceholderPage title="Theaters" />} />
-          <Route path="screens" element={<AdminPlaceholderPage title="Screens" />} />
+          <Route path="theaters" element={<AdminTheatersPage />} />
+          <Route path="theaters/new" element={<AdminTheaterFormPage />} />
+          <Route path="theaters/:id/edit" element={<AdminTheaterFormPage />} />
+          <Route path="screens" element={<AdminScreensPage />} />
+          <Route path="screens/new" element={<AdminScreenFormPage />} />
+          <Route path="screens/:id/edit" element={<AdminScreenFormPage />} />
           <Route path="showtimes" element={<AdminPlaceholderPage title="Showtimes" />} />
         </Route>
       </Route>
