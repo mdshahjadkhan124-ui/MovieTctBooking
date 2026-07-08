@@ -1,5 +1,19 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import * as showtimeService from "../services/showtimeService.js";
+import * as waitlistService from "../services/waitlistService.js";
+
+// showtimeService can't import waitlistService directly (waitlistService
+// already depends on showtimeService for seat availability — importing it
+// back would be circular), so the two opportunistic triggers below
+// (release, and the polled locks read) live here at the controller instead.
+// Never let a waitlist bug fail the request it's riding on.
+const processWaitlistSafely = async (showtimeId) => {
+  try {
+    await waitlistService.processWaitlist(showtimeId);
+  } catch (err) {
+    console.error("Waitlist processing failed:", err);
+  }
+};
 
 export const listPublic = asyncHandler(async (req, res) => {
   const { movie, city, date } = req.query;
@@ -63,10 +77,18 @@ export const lock = asyncHandler(async (req, res) => {
 export const releaseLock = asyncHandler(async (req, res) => {
   const { token } = req.body;
   const released = await showtimeService.releaseSeatLocks(req.params.id, token);
+  // A manual release is an instant, explicit version of "lock expiry" — one
+  // of the two seat-freeing events the waitlist is meant to react to.
+  await processWaitlistSafely(req.params.id);
   res.json({ success: true, data: { released }, message: "" });
 });
 
 export const lockStatus = asyncHandler(async (req, res) => {
+  // No Redis keyspace notifications wired up, so an expired offer otherwise
+  // sits un-reconciled until something checks — this frequently-polled read
+  // is the low-cost opportunistic checkpoint that catches it (see
+  // waitlistService's processWaitlist doc comment).
+  await processWaitlistSafely(req.params.id);
   const lockedSeatIds = await showtimeService.getLockedSeats(req.params.id);
   res.json({ success: true, data: { lockedSeatIds }, message: "" });
 });

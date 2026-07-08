@@ -9,15 +9,19 @@ import {
   useGetSeatPricingQuery,
 } from "../api/showtimesApi.js";
 import { useCheckoutMutation, useLazyGetBookingByIdQuery } from "../api/bookingsApi.js";
+import { useGetMeQuery } from "../api/authApi.js";
+import { useGetMyWaitlistStatusQuery } from "../api/waitlistApi.js";
 import { stripePromise } from "../lib/stripe.js";
 import { socket } from "../lib/socket.js";
 import { buildSeatGrid } from "../utils/buildSeatGrid.js";
-import { toggleSeat, clearSelection } from "../features/seatSelection/seatSelectionSlice.js";
+import { toggleSeat, clearSelection, setSelection } from "../features/seatSelection/seatSelectionSlice.js";
 import ScreenIndicator from "../features/seatSelection/components/ScreenIndicator.jsx";
 import SeatGrid from "../features/seatSelection/components/SeatGrid.jsx";
 import Legend from "../features/seatSelection/components/Legend.jsx";
 import SelectionSummary from "../features/seatSelection/components/SelectionSummary.jsx";
 import CheckoutForm from "../features/seatSelection/components/CheckoutForm.jsx";
+import WaitlistPanel from "../features/seatSelection/components/WaitlistPanel.jsx";
+import WaitlistOfferBanner from "../features/seatSelection/components/WaitlistOfferBanner.jsx";
 
 const POLL_INTERVAL_MS = 1500;
 const POLL_MAX_ATTEMPTS = 10;
@@ -27,6 +31,7 @@ const SeatSelectionPage = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
   const { data: showtime, isLoading, isError } = useGetShowtimeByIdQuery(id);
+  const { data: user } = useGetMeQuery();
 
   // Socket.IO is the primary source of truth for lock state; polling is the
   // fallback for when it's unavailable (Render's free tier idles WebSocket
@@ -57,6 +62,29 @@ const SeatSelectionPage = () => {
     (pricing?.seatPrices ?? []).map((sp) => [sp.seatId, sp])
   );
 
+  // Only meaningful for a logged-in user — the waitlist endpoints require
+  // auth, so there's nothing to fetch (or show) for an anonymous visitor.
+  const { data: myWaitlistStatus, refetch: refetchWaitlistStatus } = useGetMyWaitlistStatusQuery(
+    id,
+    { skip: !user }
+  );
+  const [waitlistOffer, setWaitlistOffer] = useState(null);
+
+  // Keeps the offer banner correct across a page load/refresh (not just the
+  // live socket push): if the server says this user is currently "notified"
+  // for this showtime, show the same banner+countdown as if the socket
+  // event had just arrived.
+  useEffect(() => {
+    if (myWaitlistStatus?.status === "notified") {
+      setWaitlistOffer({
+        showtimeId: id,
+        seatIds: myWaitlistStatus.heldSeatIds,
+        seatsRequested: myWaitlistStatus.seatsRequested,
+        expiresAt: new Date(myWaitlistStatus.holdExpiresAt).getTime(),
+      });
+    }
+  }, [myWaitlistStatus, id]);
+
   const [lockSeats] = useLockSeatsMutation();
   const [checkout] = useCheckoutMutation();
   const [fetchBooking] = useLazyGetBookingByIdQuery();
@@ -78,14 +106,18 @@ const SeatSelectionPage = () => {
     setBookingId(null);
     setChargeAmount(null);
     setPriceNotice("");
+    setWaitlistOffer(null);
   }, [id, dispatch]);
 
   useEffect(() => () => clearTimeout(pollTimeoutRef.current), []);
 
-  // Joins this showtime's room and listens for real-time lock changes.
-  // Reconnection is handled by socket.io-client itself (on by default) —
-  // "connect" fires again after a drop, and rejoining the room there is
-  // required because a reconnect is a new socket id, not a resumed one.
+  // Joins this showtime's room and listens for real-time lock changes and
+  // (for a logged-in socket — see config/socket.js's cookie-authenticated
+  // `user:{id}` room) personal waitlist offers. Reconnection is handled by
+  // socket.io-client itself (on by default) — "connect" fires again after a
+  // drop, and rejoining the showtime room there is required because a
+  // reconnect is a new socket id, not a resumed one; the user room is
+  // rejoined automatically server-side from the same auth cookie.
   useEffect(() => {
     setRealtimeLockedSeatIds(null);
 
@@ -97,11 +129,15 @@ const SeatSelectionPage = () => {
     const handleSeatsUpdated = (payload) => {
       if (payload.showtimeId === id) setRealtimeLockedSeatIds(payload.lockedSeatIds);
     };
+    const handleWaitlistOffer = (payload) => {
+      if (payload.showtimeId === id) setWaitlistOffer(payload);
+    };
 
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("connect_error", handleDisconnect);
     socket.on("seatsUpdated", handleSeatsUpdated);
+    socket.on("waitlistOffer", handleWaitlistOffer);
     socket.connect();
 
     return () => {
@@ -110,6 +146,7 @@ const SeatSelectionPage = () => {
       socket.off("disconnect", handleDisconnect);
       socket.off("connect_error", handleDisconnect);
       socket.off("seatsUpdated", handleSeatsUpdated);
+      socket.off("waitlistOffer", handleWaitlistOffer);
       socket.disconnect();
       setIsSocketConnected(false);
     };
@@ -130,6 +167,7 @@ const SeatSelectionPage = () => {
     lockedSeatIds.filter((seatId) => !selectedSeatIds.includes(seatId))
   );
   const grid = buildSeatGrid(showtime.screen?.layout, lockedByOthers);
+  const availableCount = grid.flat().filter((seat) => seat.status === "available").length;
 
   // Per-seat prices only differ by position (occupancy/time are the same
   // for every seat right now), so distinct position labels are exactly the
@@ -168,20 +206,29 @@ const SeatSelectionPage = () => {
     }, POLL_INTERVAL_MS);
   };
 
-  const handleProceed = async () => {
+  // Shared by both the normal "click seats, then proceed" path and a
+  // waitlist offer's "Book Now" — the only real difference is that an
+  // offer's seats are already locked (under this exact user's token, by
+  // waitlistService), so locking them again would just fail with a false
+  // "unavailable" conflict. skipLock lets the offer path go straight to
+  // checkout, which re-derives ownership from the existing Redis lock
+  // exactly like any other checkout does.
+  const runCheckout = async (seatIdsToBook, { skipLock }) => {
     setCheckoutError("");
     setPriceNotice("");
     setCheckoutState("locking");
     try {
-      await lockSeats({ showtimeId: id, seatIds: selectedSeatIds }).unwrap();
-      const result = await checkout({ showtimeId: id, seatIds: selectedSeatIds }).unwrap();
+      if (!skipLock) {
+        await lockSeats({ showtimeId: id, seatIds: seatIdsToBook }).unwrap();
+      }
+      const result = await checkout({ showtimeId: id, seatIds: seatIdsToBook }).unwrap();
 
       // The server recomputes price independently of anything shown here —
       // occupancy can shift between "seat selected" and "checkout submitted"
       // (someone else bought seats in between). If the authoritative amount
       // differs from what the user was just looking at, say so plainly
       // rather than silently charging a different number.
-      const displayedTotal = selectedSeatIds.reduce(
+      const displayedTotal = seatIdsToBook.reduce(
         (sum, seatId) => sum + (seatPricesById[seatId]?.finalPrice ?? 0),
         0
       );
@@ -204,6 +251,20 @@ const SeatSelectionPage = () => {
       setCheckoutError(message);
       setCheckoutState("error");
     }
+  };
+
+  const handleProceed = () => runCheckout(selectedSeatIds, { skipLock: false });
+
+  const handleBookOffer = () => {
+    const offerSeatIds = waitlistOffer.seatIds;
+    dispatch(setSelection(offerSeatIds));
+    setWaitlistOffer(null);
+    runCheckout(offerSeatIds, { skipLock: true });
+  };
+
+  const handleOfferExpire = () => {
+    setWaitlistOffer(null);
+    refetchWaitlistStatus();
   };
 
   const handleCharged = () => {
@@ -259,6 +320,26 @@ const SeatSelectionPage = () => {
         {isSocketConnected ? "Live seat updates" : "Updating every 12s"}
       </p>
 
+      {user && waitlistOffer && (
+        <WaitlistOfferBanner
+          offer={waitlistOffer}
+          onBookNow={handleBookOffer}
+          onExpire={handleOfferExpire}
+          busy={checkoutState !== "idle"}
+        />
+      )}
+
+      {user &&
+        !waitlistOffer &&
+        checkoutState === "idle" &&
+        (availableCount === 0 || myWaitlistStatus?.status === "waiting") && (
+          <WaitlistPanel
+            showtimeId={id}
+            myStatus={myWaitlistStatus}
+            onChanged={refetchWaitlistStatus}
+          />
+        )}
+
       {checkoutState === "awaiting_payment" && clientSecret && (
         <div className="px-4 py-4">
           {priceNotice && (
@@ -303,7 +384,7 @@ const SeatSelectionPage = () => {
         </div>
       )}
 
-      {checkoutState !== "success" && (
+      {checkoutState !== "success" && !waitlistOffer && (
         <SelectionSummary
           selectedSeatIds={selectedSeatIds}
           seatPricesById={seatPricesById}

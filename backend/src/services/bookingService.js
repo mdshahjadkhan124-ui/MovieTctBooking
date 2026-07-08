@@ -8,6 +8,7 @@ import { emitSeatsUpdated } from "../config/socket.js";
 import { buildSeatGrid } from "../utils/buildSeatGrid.js";
 import { calculateSeatPrice } from "./pricingService.js";
 import { calculateRefund } from "./refundPolicyService.js";
+import * as waitlistService from "./waitlistService.js";
 
 // The one place checkout amount gets decided — recomputed fresh from
 // current occupancy every time, independent of whatever the client last
@@ -165,6 +166,16 @@ export const cancelBooking = async (userId, bookingId) => {
   const showtimeId = booking.showtime._id.toString();
   emitSeatsUpdated(showtimeId, await getUnavailableSeatIds(showtimeId));
 
+  // Cancellation is the primary, event-driven trigger for advancing the
+  // waitlist (see waitlistService's own doc comment for the other,
+  // opportunistic triggers). Never let a waitlist bug fail a cancellation
+  // that has already committed by this point.
+  try {
+    await waitlistService.processWaitlist(showtimeId);
+  } catch (err) {
+    console.error("Waitlist processing failed after cancellation:", err);
+  }
+
   return { booking: claimed, refundPercent, refundAmount, reason };
 };
 
@@ -194,6 +205,19 @@ const handlePaymentSucceeded = async (paymentIntent) => {
 
   if (intendedStatus === "confirmed") {
     const showtimeId = booking.showtime.toString();
+    // Checked before releasing the lock below — fulfillIfMatchingOffer only
+    // needs the seatIds, and doing this first means "was this booking the
+    // exclusive hold being exercised" is judged against the lock that was
+    // actually still there a moment ago, not after it's already gone.
+    try {
+      await waitlistService.fulfillIfMatchingOffer(
+        booking.user.toString(),
+        showtimeId,
+        booking.seatIds
+      );
+    } catch (err) {
+      console.error("Waitlist fulfillment check failed:", err);
+    }
     await seatLockService.releaseLocksByToken(showtimeId, token);
     // The lock is gone from Redis now, but getUnavailableSeatIds re-includes
     // these seats via the Booking we just confirmed above — so the broadcast

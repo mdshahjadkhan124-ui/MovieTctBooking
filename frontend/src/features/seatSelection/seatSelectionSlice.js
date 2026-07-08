@@ -26,11 +26,16 @@ const seatSelectionSlice = createSlice({
     clearSelection: (state) => {
       state.selectedSeatIds = [];
     },
+    // Replaces the selection wholesale — used for booking a waitlist offer's
+    // predetermined seats, where the user didn't click each seat themselves.
+    setSelection: (state, action) => {
+      state.selectedSeatIds = action.payload;
+    },
     setMaxSeats: (state, action) => {
       state.maxSeats = action.payload;
     },
   },
 });
 
-export const { toggleSeat, clearSelection, setMaxSeats } = seatSelectionSlice.actions;
+export const { toggleSeat, clearSelection, setSelection, setMaxSeats } = seatSelectionSlice.actions;
 export default seatSelectionSlice.reducer;
