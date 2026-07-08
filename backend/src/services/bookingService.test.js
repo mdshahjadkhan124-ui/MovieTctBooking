@@ -24,6 +24,10 @@ let movie;
 let theater;
 let screen;
 let showtime;
+let showtimeFarFuture;
+let showtimeSoon;
+let showtimeVerySoon;
+let showtimeStarted;
 
 const userId = new mongoose.Types.ObjectId().toString();
 
@@ -54,11 +58,37 @@ beforeAll(async () => {
     price: 200,
     format: "2D",
   });
+
+  // Dedicated showtimes for cancellation tests, deliberately far from any
+  // refund-tier boundary (unlike `showtime` above, which sits right at the
+  // 24h line) so these tests are never flaky against real wall-clock drift
+  // between beforeAll and whenever a given test actually runs.
+  const makeShowtime = (hoursFromNow) =>
+    Showtime.create({
+      movie: movie._id,
+      screen: screen._id,
+      theater: theater._id,
+      startTime: new Date(Date.now() + hoursFromNow * 60 * 60 * 1000),
+      endTime: new Date(Date.now() + (hoursFromNow + 2) * 60 * 60 * 1000),
+      price: 200,
+      format: "2D",
+    });
+  showtimeFarFuture = await makeShowtime(48);
+  showtimeSoon = await makeShowtime(10);
+  showtimeVerySoon = await makeShowtime(2);
+  showtimeStarted = await makeShowtime(-1);
 }, 30000);
 
 afterAll(async () => {
-  await Booking.deleteMany({ showtime: showtime._id });
-  await Showtime.deleteOne({ _id: showtime._id });
+  const allShowtimeIds = [
+    showtime._id,
+    showtimeFarFuture._id,
+    showtimeSoon._id,
+    showtimeVerySoon._id,
+    showtimeStarted._id,
+  ];
+  await Booking.deleteMany({ showtime: { $in: allShowtimeIds } });
+  await Showtime.deleteMany({ _id: { $in: allShowtimeIds } });
   await Screen.deleteOne({ _id: screen._id });
   await Theater.deleteOne({ _id: theater._id });
   await Movie.deleteOne({ _id: movie._id });
@@ -93,6 +123,25 @@ const failedEvent = (paymentIntent) => ({
   type: "payment_intent.payment_failed",
   data: { object: paymentIntent },
 });
+
+// Full lock -> checkout -> real Stripe confirm -> webhook-relayed confirm,
+// used by the cancellation tests below, which only care about what happens
+// after a booking is already genuinely "confirmed".
+const checkoutAndConfirm = async (showtimeDoc, seatIds) => {
+  await seatLockService.acquireLocks(showtimeDoc._id.toString(), seatIds, userId);
+  const { bookingId } = await bookingService.createCheckout(
+    userId,
+    showtimeDoc._id.toString(),
+    seatIds
+  );
+  const booking = await Booking.findById(bookingId);
+  const confirmedIntent = await stripe.paymentIntents.confirm(booking.paymentIntentId, {
+    payment_method: "pm_card_visa",
+  });
+  const { status } = await signAndPost(succeededEvent(confirmedIntent));
+  expect(status).toBe(200);
+  return bookingId;
+};
 
 describe("booking checkout + Stripe webhook", () => {
   it("happy path: lock -> checkout -> succeeded webhook -> confirmed, locks consumed", async () => {
@@ -268,4 +317,146 @@ describe("booking checkout + Stripe webhook", () => {
 
     expect(booking.amount).toBe(expected.finalPrice);
   });
+});
+
+describe("booking cancellation", () => {
+  it("24+ hours before showtime -> full refund, cancelled, seats freed", async () => {
+    const seatIds = ["A1"];
+    const bookingId = await checkoutAndConfirm(showtimeFarFuture, seatIds);
+    const original = await Booking.findById(bookingId);
+
+    const result = await bookingService.cancelBooking(userId, bookingId);
+    expect(result.refundPercent).toBe(100);
+    expect(result.refundAmount).toBe(original.amount);
+    expect(result.booking.status).toBe("cancelled");
+    expect(result.booking.refundId).toBeTruthy();
+    expect(result.booking.cancelledAt).toBeTruthy();
+
+    const refunds = await stripe.refunds.list({ payment_intent: original.paymentIntentId });
+    expect(refunds.data.some((r) => r.amount === Math.round(result.refundAmount * 100))).toBe(
+      true
+    );
+
+    const unavailable = await getUnavailableSeatIds(showtimeFarFuture._id.toString());
+    expect(unavailable).not.toContain("A1");
+  }, 20000);
+
+  it("6-24 hours before showtime -> 50% refund", async () => {
+    const seatIds = ["A2"];
+    const bookingId = await checkoutAndConfirm(showtimeSoon, seatIds);
+    const original = await Booking.findById(bookingId);
+
+    const result = await bookingService.cancelBooking(userId, bookingId);
+    expect(result.refundPercent).toBe(50);
+    expect(result.refundAmount).toBe(Math.round(original.amount * 0.5));
+    expect(result.booking.status).toBe("cancelled");
+  }, 20000);
+
+  it("less than 6 hours before showtime -> 0% refund, still cancels, no Stripe refund created", async () => {
+    const seatIds = ["A3"];
+    const bookingId = await checkoutAndConfirm(showtimeVerySoon, seatIds);
+    const original = await Booking.findById(bookingId);
+    const refundsBefore = await stripe.refunds.list({ payment_intent: original.paymentIntentId });
+
+    const result = await bookingService.cancelBooking(userId, bookingId);
+    expect(result.refundPercent).toBe(0);
+    expect(result.refundAmount).toBe(0);
+    expect(result.booking.status).toBe("cancelled");
+    expect(result.booking.refundId).toBeFalsy();
+
+    const refundsAfter = await stripe.refunds.list({ payment_intent: original.paymentIntentId });
+    expect(refundsAfter.data.length).toBe(refundsBefore.data.length);
+  }, 20000);
+
+  it("after showtime has started -> cancellation rejected, booking stays confirmed", async () => {
+    const seatIds = ["A4"];
+    const bookingId = await checkoutAndConfirm(showtimeStarted, seatIds);
+
+    await expect(bookingService.cancelBooking(userId, bookingId)).rejects.toMatchObject({
+      statusCode: 409,
+      code: "CANCELLATION_WINDOW_CLOSED",
+    });
+
+    const stillConfirmed = await Booking.findById(bookingId);
+    expect(stillConfirmed.status).toBe("confirmed");
+  }, 20000);
+
+  it("only the booking's owner can cancel it", async () => {
+    const seatIds = ["A5"];
+    const bookingId = await checkoutAndConfirm(showtimeFarFuture, seatIds);
+    const otherUserId = new mongoose.Types.ObjectId().toString();
+
+    await expect(bookingService.cancelBooking(otherUserId, bookingId)).rejects.toMatchObject({
+      statusCode: 403,
+      code: "FORBIDDEN",
+    });
+
+    const stillConfirmed = await Booking.findById(bookingId);
+    expect(stillConfirmed.status).toBe("confirmed");
+  }, 20000);
+
+  it("cancelling a non-confirmed (pending) booking is rejected", async () => {
+    const seatIds = ["B1"];
+    await seatLockService.acquireLocks(showtimeFarFuture._id.toString(), seatIds, userId);
+    const { bookingId } = await bookingService.createCheckout(
+      userId,
+      showtimeFarFuture._id.toString(),
+      seatIds
+    );
+    // Deliberately never confirmed via webhook — stays "pending".
+
+    await expect(bookingService.cancelBooking(userId, bookingId)).rejects.toMatchObject({
+      statusCode: 409,
+      code: "NOT_CANCELLABLE",
+    });
+  }, 20000);
+
+  it("double-cancel (sequential) is idempotent — second attempt fails cleanly, never double-refunds", async () => {
+    const seatIds = ["B2"];
+    const bookingId = await checkoutAndConfirm(showtimeFarFuture, seatIds);
+
+    const first = await bookingService.cancelBooking(userId, bookingId);
+    expect(first.booking.status).toBe("cancelled");
+
+    // Once cancelled, the earlier status check ("only confirmed bookings can
+    // be cancelled") is what a sequential second call actually hits — a
+    // clean, correct rejection either way. ALREADY_CANCELLED (below) is the
+    // deeper guard for a genuine concurrent race, not reachable here since
+    // this second call reads the already-updated status before ever
+    // attempting the atomic claim.
+    await expect(bookingService.cancelBooking(userId, bookingId)).rejects.toMatchObject({
+      statusCode: 409,
+      code: "NOT_CANCELLABLE",
+    });
+
+    const refunds = await stripe.refunds.list({ payment_intent: first.booking.paymentIntentId });
+    expect(refunds.data.length).toBe(1);
+  }, 20000);
+
+  it("double-cancel (concurrent race) never double-refunds — only one of two simultaneous requests wins", async () => {
+    const seatIds = ["B3"];
+    const bookingId = await checkoutAndConfirm(showtimeFarFuture, seatIds);
+
+    // Both requests read status: "confirmed" before either has written —
+    // this is exactly the race the atomic findOneAndUpdate claim (not the
+    // earlier status check) is there to close. Exactly one should succeed;
+    // the other should fail with ALREADY_CANCELLED, and Stripe should only
+    // ever see one refund.
+    const [resultA, resultB] = await Promise.allSettled([
+      bookingService.cancelBooking(userId, bookingId),
+      bookingService.cancelBooking(userId, bookingId),
+    ]);
+
+    const fulfilled = [resultA, resultB].filter((r) => r.status === "fulfilled");
+    const rejected = [resultA, resultB].filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toMatchObject({ statusCode: 409, code: "ALREADY_CANCELLED" });
+
+    const finalBooking = await Booking.findById(bookingId);
+    expect(finalBooking.status).toBe("cancelled");
+
+    const refunds = await stripe.refunds.list({ payment_intent: finalBooking.paymentIntentId });
+    expect(refunds.data.length).toBe(1);
+  }, 20000);
 });

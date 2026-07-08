@@ -7,6 +7,7 @@ import { getUnavailableSeatIds } from "./showtimeService.js";
 import { emitSeatsUpdated } from "../config/socket.js";
 import { buildSeatGrid } from "../utils/buildSeatGrid.js";
 import { calculateSeatPrice } from "./pricingService.js";
+import { calculateRefund } from "./refundPolicyService.js";
 
 // The one place checkout amount gets decided — recomputed fresh from
 // current occupancy every time, independent of whatever the client last
@@ -107,6 +108,64 @@ export const getBookingById = async (userId, bookingId) => {
     throw new AppError("Not authorized to view this booking", 403, "FORBIDDEN");
   }
   return booking;
+};
+
+export const cancelBooking = async (userId, bookingId) => {
+  const booking = await Booking.findById(bookingId).populate("showtime");
+  if (!booking) throw new AppError("Booking not found", 404, "NOT_FOUND");
+  if (booking.user.toString() !== userId) {
+    throw new AppError("Not authorized to cancel this booking", 403, "FORBIDDEN");
+  }
+  if (booking.status !== "confirmed") {
+    throw new AppError(
+      `Only confirmed bookings can be cancelled (this one is ${booking.status})`,
+      409,
+      "NOT_CANCELLABLE"
+    );
+  }
+
+  const { allowed, refundPercent, refundAmount, reason } = calculateRefund(
+    booking,
+    booking.showtime,
+    new Date()
+  );
+  if (!allowed) {
+    throw new AppError(reason, 409, "CANCELLATION_WINDOW_CLOSED");
+  }
+
+  // Atomically claim confirmed -> cancelled BEFORE touching Stripe, same
+  // shape as handlePaymentSucceeded's claim below. Whoever wins this is the
+  // only caller that will ever process the refund for this booking — a
+  // concurrent or retried cancel request finds nothing left to claim and
+  // fails cleanly (ALREADY_CANCELLED) instead of double-refunding.
+  const claimed = await Booking.findOneAndUpdate(
+    { _id: booking._id, status: "confirmed" },
+    { status: "cancelled", cancelledAt: new Date() },
+    { new: true }
+  );
+  if (!claimed) {
+    throw new AppError("This booking was already cancelled", 409, "ALREADY_CANCELLED");
+  }
+
+  if (refundAmount > 0) {
+    const refund = await stripe.refunds.create({
+      payment_intent: booking.paymentIntentId,
+      amount: Math.round(refundAmount * 100),
+    });
+    claimed.refundId = refund.id;
+  }
+  claimed.refundAmount = refundAmount;
+  await claimed.save();
+  await claimed.populate(BOOKING_POPULATE);
+
+  // Cancelling frees the seats: getUnavailableSeatIds only counts
+  // status: "confirmed" bookings, so this one's seatIds drop out of that
+  // set the instant the status above changed — the broadcast just tells
+  // anyone already looking at this showtime, in real time.
+  const showtimeId = booking.showtime._id.toString();
+  emitSeatsUpdated(showtimeId, await getUnavailableSeatIds(showtimeId));
+
+  return { booking: claimed, refundPercent, refundAmount, reason };
 };
 
 const handlePaymentSucceeded = async (paymentIntent) => {

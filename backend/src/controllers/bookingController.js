@@ -23,3 +23,11 @@ export const getById = asyncHandler(async (req, res) => {
   );
   res.json({ success: true, data: { booking }, message: "" });
 });
+
+export const cancel = asyncHandler(async (req, res) => {
+  const result = await bookingService.cancelBooking(
+    req.user._id.toString(),
+    req.params.id
+  );
+  res.json({ success: true, data: result, message: "" });
+});

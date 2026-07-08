@@ -8,5 +8,6 @@ const router = Router();
 router.post("/checkout", protect, validateCheckoutRequest, bookingController.checkout);
 router.get("/me", protect, bookingController.listMine);
 router.get("/:id", protect, bookingController.getById);
+router.post("/:id/cancel", protect, bookingController.cancel);
 
 export default router;

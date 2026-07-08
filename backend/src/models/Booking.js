@@ -9,12 +9,19 @@ const bookingSchema = new mongoose.Schema(
     amount: { type: Number, required: true },
     status: {
       type: String,
-      enum: ["pending", "confirmed", "failed"],
+      enum: ["pending", "confirmed", "failed", "cancelled"],
       default: "pending",
     },
     // unique+sparse: every booking gets one at creation in practice, but
     // sparse keeps the door open for a future booking path that doesn't.
     paymentIntentId: { type: String, unique: true, sparse: true },
+    // Populated only when status is "cancelled" — refundAmount is 0 (not
+    // unset) for a within-6-hours cancellation, so its presence/absence
+    // isn't itself meaningful, only cancelledAt is (a cheap "was this ever
+    // cancelled" check without a status comparison).
+    refundAmount: { type: Number },
+    refundId: { type: String },
+    cancelledAt: { type: Date },
   },
   { timestamps: true }
 );
