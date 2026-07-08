@@ -16,7 +16,8 @@ import AdminTheatersPage from "./admin/pages/AdminTheatersPage.jsx";
 import AdminTheaterFormPage from "./admin/pages/AdminTheaterFormPage.jsx";
 import AdminScreensPage from "./admin/pages/AdminScreensPage.jsx";
 import AdminScreenFormPage from "./admin/pages/AdminScreenFormPage.jsx";
-import AdminPlaceholderPage from "./admin/pages/AdminPlaceholderPage.jsx";
+import AdminShowtimesPage from "./admin/pages/AdminShowtimesPage.jsx";
+import AdminShowtimeFormPage from "./admin/pages/AdminShowtimeFormPage.jsx";
 
 const App = () => {
   return (
@@ -45,7 +46,9 @@ const App = () => {
           <Route path="screens" element={<AdminScreensPage />} />
           <Route path="screens/new" element={<AdminScreenFormPage />} />
           <Route path="screens/:id/edit" element={<AdminScreenFormPage />} />
-          <Route path="showtimes" element={<AdminPlaceholderPage title="Showtimes" />} />
+          <Route path="showtimes" element={<AdminShowtimesPage />} />
+          <Route path="showtimes/new" element={<AdminShowtimeFormPage />} />
+          <Route path="showtimes/:id/edit" element={<AdminShowtimeFormPage />} />
         </Route>
       </Route>
     </Routes>
