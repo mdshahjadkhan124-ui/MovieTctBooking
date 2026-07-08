@@ -21,6 +21,14 @@ export const bookingsApi = apiSlice.injectEndpoints({
       transformResponse: (response) => response.data.bookings,
       providesTags: ["Booking"],
     }),
+    cancelBooking: builder.mutation({
+      query: (id) => ({
+        url: `/bookings/${id}/cancel`,
+        method: "POST",
+      }),
+      transformResponse: (response) => response.data,
+      invalidatesTags: ["Booking"],
+    }),
   }),
 });
 
@@ -29,4 +37,5 @@ export const {
   useLazyGetBookingByIdQuery,
   useGetBookingByIdQuery,
   useGetMyBookingsQuery,
+  useCancelBookingMutation,
 } = bookingsApi;
