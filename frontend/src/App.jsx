@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import HomePage from "./pages/HomePage.jsx";
@@ -8,6 +8,11 @@ import LoginPage from "./pages/LoginPage.jsx";
 import SignupPage from "./pages/SignupPage.jsx";
 import MyBookingsPage from "./pages/MyBookingsPage.jsx";
 import ETicketPage from "./pages/ETicketPage.jsx";
+import AdminRoute from "./admin/AdminRoute.jsx";
+import AdminLayout from "./admin/AdminLayout.jsx";
+import AdminMoviesPage from "./admin/pages/AdminMoviesPage.jsx";
+import AdminMovieFormPage from "./admin/pages/AdminMovieFormPage.jsx";
+import AdminPlaceholderPage from "./admin/pages/AdminPlaceholderPage.jsx";
 
 const App = () => {
   return (
@@ -21,6 +26,18 @@ const App = () => {
         <Route element={<ProtectedRoute />}>
           <Route path="/bookings" element={<MyBookingsPage />} />
           <Route path="/bookings/:id/ticket" element={<ETicketPage />} />
+        </Route>
+      </Route>
+
+      <Route path="/admin" element={<AdminRoute />}>
+        <Route element={<AdminLayout />}>
+          <Route index element={<Navigate to="/admin/movies" replace />} />
+          <Route path="movies" element={<AdminMoviesPage />} />
+          <Route path="movies/new" element={<AdminMovieFormPage />} />
+          <Route path="movies/:id/edit" element={<AdminMovieFormPage />} />
+          <Route path="theaters" element={<AdminPlaceholderPage title="Theaters" />} />
+          <Route path="screens" element={<AdminPlaceholderPage title="Screens" />} />
+          <Route path="showtimes" element={<AdminPlaceholderPage title="Showtimes" />} />
         </Route>
       </Route>
     </Routes>
