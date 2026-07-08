@@ -7,6 +7,7 @@ import { assertTheaterAccess } from "../utils/assertTheaterAccess.js";
 import { buildSeatGrid } from "../utils/buildSeatGrid.js";
 import { recommendSeats } from "./seatRecommendation.js";
 import * as seatLockService from "./seatLockService.js";
+import { emitSeatsUpdated } from "../config/socket.js";
 
 const assertNoOverlap = async (screenId, startTime, endTime, excludeId) => {
   const query = {
@@ -153,11 +154,23 @@ export const lockSeats = async (showtimeId, seatIds, userId) => {
     );
   }
 
-  return seatLockService.acquireLocks(showtimeId, seatIds, userId);
+  const result = await seatLockService.acquireLocks(showtimeId, seatIds, userId);
+  if (result.success) {
+    // Broadcast is a side effect of a successful lock, not a dependency of
+    // it — emitSeatsUpdated never throws, so a socket outage can't fail a
+    // real lock acquisition.
+    const lockedSeatIds = await seatLockService.getLockedSeatIds(showtimeId);
+    emitSeatsUpdated(showtimeId, lockedSeatIds);
+  }
+  return result;
 };
 
-export const releaseSeatLocks = (showtimeId, token) =>
-  seatLockService.releaseLocksByToken(showtimeId, token);
+export const releaseSeatLocks = async (showtimeId, token) => {
+  const released = await seatLockService.releaseLocksByToken(showtimeId, token);
+  const lockedSeatIds = await seatLockService.getLockedSeatIds(showtimeId);
+  emitSeatsUpdated(showtimeId, lockedSeatIds);
+  return released;
+};
 
 export const getLockedSeats = (showtimeId) => seatLockService.getLockedSeatIds(showtimeId);
 

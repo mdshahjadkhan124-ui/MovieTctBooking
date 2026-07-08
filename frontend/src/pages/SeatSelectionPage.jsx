@@ -9,6 +9,7 @@ import {
 } from "../api/showtimesApi.js";
 import { useCheckoutMutation, useLazyGetBookingByIdQuery } from "../api/bookingsApi.js";
 import { stripePromise } from "../lib/stripe.js";
+import { socket } from "../lib/socket.js";
 import { buildSeatGrid } from "../utils/buildSeatGrid.js";
 import { toggleSeat, clearSelection } from "../features/seatSelection/seatSelectionSlice.js";
 import ScreenIndicator from "../features/seatSelection/components/ScreenIndicator.jsx";
@@ -25,11 +26,25 @@ const SeatSelectionPage = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
   const { data: showtime, isLoading, isError } = useGetShowtimeByIdQuery(id);
-  const { data: lockedSeatIds = [] } = useGetLockedSeatsQuery(id, {
-    pollingInterval: LOCK_REFRESH_INTERVAL_MS,
+
+  // Socket.IO is the primary source of truth for lock state; polling is the
+  // fallback for when it's unavailable (Render's free tier idles WebSocket
+  // connections out, and any network blip drops them too). Polling pauses
+  // itself (pollingInterval: 0) whenever the socket is live, and resumes the
+  // instant it isn't — no manual coordination beyond that flag.
+  const [isSocketConnected, setIsSocketConnected] = useState(false);
+  const [realtimeLockedSeatIds, setRealtimeLockedSeatIds] = useState(null);
+
+  const { data: polledLockedSeatIds = [] } = useGetLockedSeatsQuery(id, {
+    pollingInterval: isSocketConnected ? 0 : LOCK_REFRESH_INTERVAL_MS,
     refetchOnFocus: true,
     refetchOnReconnect: true,
   });
+  const lockedSeatIds =
+    isSocketConnected && realtimeLockedSeatIds !== null
+      ? realtimeLockedSeatIds
+      : polledLockedSeatIds;
+
   const selectedSeatIds = useSelector((state) => state.seatSelection.selectedSeatIds);
 
   const [lockSeats] = useLockSeatsMutation();
@@ -52,6 +67,39 @@ const SeatSelectionPage = () => {
   }, [id, dispatch]);
 
   useEffect(() => () => clearTimeout(pollTimeoutRef.current), []);
+
+  // Joins this showtime's room and listens for real-time lock changes.
+  // Reconnection is handled by socket.io-client itself (on by default) —
+  // "connect" fires again after a drop, and rejoining the room there is
+  // required because a reconnect is a new socket id, not a resumed one.
+  useEffect(() => {
+    setRealtimeLockedSeatIds(null);
+
+    const handleConnect = () => {
+      setIsSocketConnected(true);
+      socket.emit("joinShowtime", id);
+    };
+    const handleDisconnect = () => setIsSocketConnected(false);
+    const handleSeatsUpdated = (payload) => {
+      if (payload.showtimeId === id) setRealtimeLockedSeatIds(payload.lockedSeatIds);
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleDisconnect);
+    socket.on("seatsUpdated", handleSeatsUpdated);
+    socket.connect();
+
+    return () => {
+      socket.emit("leaveShowtime", id);
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleDisconnect);
+      socket.off("seatsUpdated", handleSeatsUpdated);
+      socket.disconnect();
+      setIsSocketConnected(false);
+    };
+  }, [id]);
 
   if (isLoading) {
     return <p className="px-8 py-24 text-center text-gray-500">Loading seats...</p>;
@@ -144,6 +192,13 @@ const SeatSelectionPage = () => {
       <ScreenIndicator />
       <SeatGrid grid={grid} selectedSeatIds={selectedSeatIds} onToggleSeat={handleToggleSeat} />
       <Legend />
+
+      <p className="flex items-center justify-center gap-1.5 pb-4 text-xs text-gray-400">
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${isSocketConnected ? "bg-green-500" : "bg-gray-300"}`}
+        />
+        {isSocketConnected ? "Live seat updates" : "Updating every 12s"}
+      </p>
 
       {checkoutState === "awaiting_payment" && clientSecret && (
         <div className="px-4 py-4">
