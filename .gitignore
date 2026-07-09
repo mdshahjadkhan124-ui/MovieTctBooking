@@ -3,3 +3,8 @@ node_modules/
 .DS_Store
 dist/
 build/
+
+# Local-only interview prep doc — contains candid project weak-spots,
+# not meant for recruiters browsing the public repo.
+MovieBooking-Interview-Prep.pdf
+*-Interview-Prep.pdf
