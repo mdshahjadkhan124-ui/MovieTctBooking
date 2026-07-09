@@ -1,26 +1,29 @@
 import { Link, useSearchParams } from "react-router-dom";
+import { useSelector } from "react-redux";
 import { useGetMoviesQuery } from "../api/moviesApi.js";
-import { useGetTheatersQuery } from "../api/theatersApi.js";
 
-const FILTER_KEYS = ["search", "city", "language", "genre"];
+// City is deliberately not in here — it's a navbar-level preference (see
+// features/city/citySlice.js), not a page filter you'd want cleared by
+// this page's own "Clear all".
+const FILTER_KEYS = ["search", "language", "genre"];
 
 const uniqueSorted = (values) => Array.from(new Set(values.filter(Boolean))).sort();
 
 const HomePage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const filters = Object.fromEntries(
-    FILTER_KEYS.map((key) => [key, searchParams.get(key) ?? ""])
-  );
+  const selectedCity = useSelector((state) => state.city.selectedCity);
+  const filters = {
+    ...Object.fromEntries(FILTER_KEYS.map((key) => [key, searchParams.get(key) ?? ""])),
+    city: selectedCity,
+  };
 
   const { data: movies, isLoading, isError, error } = useGetMoviesQuery(filters);
   // Unfiltered baseline, used only to build the genre/language dropdown
   // option lists — a separate, independently-cached RTK Query call.
   const { data: allMovies } = useGetMoviesQuery({});
-  const { data: theaters } = useGetTheatersQuery();
 
   const languageOptions = uniqueSorted((allMovies ?? []).map((m) => m.language));
   const genreOptions = uniqueSorted((allMovies ?? []).flatMap((m) => m.genres ?? []));
-  const cityOptions = uniqueSorted((theaters ?? []).map((t) => t.location?.city));
 
   const handleFilterChange = (key, value) => {
     const next = new URLSearchParams(searchParams);
@@ -37,19 +40,6 @@ const HomePage = () => {
       <h1 className="mb-4 text-2xl font-bold text-gray-900">Recommended Movies</h1>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <select
-          value={filters.city}
-          onChange={(e) => handleFilterChange("city", e.target.value)}
-          className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-primary"
-        >
-          <option value="">All cities</option>
-          {cityOptions.map((city) => (
-            <option key={city} value={city}>
-              {city}
-            </option>
-          ))}
-        </select>
-
         <select
           value={filters.language}
           onChange={(e) => handleFilterChange("language", e.target.value)}

@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useLocation, useSearchParams } from "react-router-dom";
+import { useDispatch, useSelector } from "react-redux";
 import { useGetMeQuery, useLogoutMutation } from "../api/authApi.js";
+import { useGetTheatersQuery } from "../api/theatersApi.js";
 import { useDebouncedValue } from "../utils/useDebouncedValue.js";
+import { setCity } from "../features/city/citySlice.js";
 
-const SECONDARY_LINKS = ["Movies", "Stream", "Events", "Plays", "Sports", "Activities"];
+const uniqueSorted = (values) => Array.from(new Set(values.filter(Boolean))).sort();
 
 const Navbar = () => {
   const { data: user } = useGetMeQuery();
@@ -11,6 +14,11 @@ const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const dispatch = useDispatch();
+
+  const { data: theaters } = useGetTheatersQuery();
+  const cityOptions = uniqueSorted((theaters ?? []).map((t) => t.location?.city));
+  const selectedCity = useSelector((state) => state.city.selectedCity);
 
   const currentSearchParam = searchParams.get("search") ?? "";
   const [searchInput, setSearchInput] = useState(currentSearchParam);
@@ -58,12 +66,19 @@ const Navbar = () => {
           />
         </div>
 
-        <button
-          type="button"
-          className="hidden shrink-0 items-center gap-1 text-sm font-medium text-gray-700 md:flex"
+        <select
+          value={selectedCity}
+          onChange={(e) => dispatch(setCity(e.target.value))}
+          aria-label="Select city"
+          className="hidden shrink-0 rounded-md border-none bg-transparent text-sm font-medium text-gray-700 outline-none md:block"
         >
-          Bengaluru
-        </button>
+          <option value="">All Cities</option>
+          {cityOptions.map((city) => (
+            <option key={city} value={city}>
+              {city}
+            </option>
+          ))}
+        </select>
 
         {user ? (
           <div className="flex shrink-0 items-center gap-3">
@@ -103,11 +118,9 @@ const Navbar = () => {
       </div>
 
       <nav className="hidden gap-6 border-t border-gray-100 px-8 py-2 text-sm font-medium text-gray-600 md:flex">
-        {SECONDARY_LINKS.map((link) => (
-          <span key={link} className="cursor-pointer hover:text-primary">
-            {link}
-          </span>
-        ))}
+        <Link to="/" className="hover:text-primary">
+          Movies
+        </Link>
       </nav>
     </header>
   );
