@@ -2,6 +2,13 @@
 
 @theme {
   --color-primary: #f84464;
+  /* #F84464 measures ~3.5:1 against white — fine for large/bold text and UI
+     components (borders, button fills, the 3:1 AA threshold) but short of
+     the 4.5:1 AA threshold for normal body text. This darker shade
+     (verified ~4.6:1) is used for hover/active states on primary-colored
+     text links, which both reads as a deliberate interaction state and
+     nudges the resting-to-hover transition toward better contrast. */
+  --color-primary-dark: #dc2f55;
   --color-navy: #0b1c39;
   --color-surface: #f5f5f7;
 }

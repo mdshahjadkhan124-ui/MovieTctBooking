@@ -71,6 +71,7 @@ const Navbar = () => {
           value={selectedCity}
           onChange={(e) => dispatch(setCity(e.target.value))}
           aria-label="Select city"
+          tone="primary"
           // !important — ThemedSelect's own wrapper already carries an
           // unconditional `inline-block`, which is equal-specificity with
           // (and, depending on Tailwind's generated rule order, can beat)
@@ -90,15 +91,17 @@ const Navbar = () => {
           <div className="flex shrink-0 items-center gap-3">
             <Link
               to="/bookings"
-              className="text-sm font-medium text-gray-700 hover:text-primary"
+              className="text-sm font-medium text-primary transition-colors hover:text-primary-dark"
             >
               My Bookings
             </Link>
+            {/* A greeting, not an action — stays neutral rather than
+                competing with the actual nav links/buttons for attention. */}
             <span className="hidden text-sm text-gray-500 md:inline">Hi, {user.name}</span>
             <button
               type="button"
               onClick={handleLogout}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700"
+              className="rounded-md border border-primary px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary hover:text-white"
             >
               Logout
             </button>
@@ -123,8 +126,8 @@ const Navbar = () => {
         </button>
       </div>
 
-      <nav className="hidden gap-6 border-t border-gray-100 px-8 py-2 text-sm font-medium text-gray-600 md:flex">
-        <Link to="/" className="hover:text-primary">
+      <nav className="hidden gap-6 border-t border-gray-100 px-8 py-2 text-sm font-medium md:flex">
+        <Link to="/" className="text-primary transition-colors hover:text-primary-dark">
           Movies
         </Link>
       </nav>
