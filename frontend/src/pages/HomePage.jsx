@@ -1,13 +1,18 @@
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { useGetMoviesQuery } from "../api/moviesApi.js";
+import HeroCarousel from "../features/movies/components/HeroCarousel.jsx";
+import MovieRow from "../features/movies/components/MovieRow.jsx";
 
 // City is deliberately not in here — it's a navbar-level preference (see
 // features/city/citySlice.js), not a page filter you'd want cleared by
 // this page's own "Clear all".
 const FILTER_KEYS = ["search", "language", "genre"];
+const HERO_SLIDE_COUNT = 5;
+const TOP_RATED_COUNT = 10;
 
 const uniqueSorted = (values) => Array.from(new Set(values.filter(Boolean))).sort();
+const byRatingDesc = (a, b) => (b.rating ?? 0) - (a.rating ?? 0);
 
 const HomePage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -25,6 +30,13 @@ const HomePage = () => {
   const languageOptions = uniqueSorted((allMovies ?? []).map((m) => m.language));
   const genreOptions = uniqueSorted((allMovies ?? []).flatMap((m) => m.genres ?? []));
 
+  // The hero and "Top Rated" both derive from the same already-fetched,
+  // already-filtered `movies` list — no separate query, so they always
+  // agree with whatever's currently filtered rather than showing content
+  // outside the active filter.
+  const topRatedMovies = [...(movies ?? [])].sort(byRatingDesc).slice(0, TOP_RATED_COUNT);
+  const heroMovies = topRatedMovies.slice(0, HERO_SLIDE_COUNT);
+
   const handleFilterChange = (key, value) => {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
@@ -36,113 +48,82 @@ const HomePage = () => {
   const clearFilters = () => setSearchParams({}, { replace: true });
 
   return (
-    <section className="bg-surface px-8 py-8">
-      <h1 className="mb-4 text-2xl font-bold text-gray-900">Recommended Movies</h1>
+    <>
+      {!isLoading && !isError && heroMovies.length > 0 && <HeroCarousel movies={heroMovies} />}
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <select
-          value={filters.language}
-          onChange={(e) => handleFilterChange("language", e.target.value)}
-          className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-primary"
-        >
-          <option value="">All languages</option>
-          {languageOptions.map((language) => (
-            <option key={language} value={language}>
-              {language}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={filters.genre}
-          onChange={(e) => handleFilterChange("genre", e.target.value)}
-          className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-primary"
-        >
-          <option value="">All genres</option>
-          {genreOptions.map((genre) => (
-            <option key={genre} value={genre}>
-              {genre}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {activeFilters.length > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          {activeFilters.map((key) => (
-            <span
-              key={key}
-              className="flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
-            >
-              {key}: {filters[key]}
-              <button
-                type="button"
-                aria-label={`Clear ${key} filter`}
-                onClick={() => handleFilterChange(key, "")}
-                className="font-bold"
-              >
-                &times;
-              </button>
-            </span>
-          ))}
-          <button
-            type="button"
-            onClick={clearFilters}
-            className="text-xs font-medium text-gray-500 underline"
+      <section className="bg-surface px-4 py-8 md:px-8">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <select
+            value={filters.language}
+            onChange={(e) => handleFilterChange("language", e.target.value)}
+            className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-primary"
           >
-            Clear all
-          </button>
+            <option value="">All languages</option>
+            {languageOptions.map((language) => (
+              <option key={language} value={language}>
+                {language}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={filters.genre}
+            onChange={(e) => handleFilterChange("genre", e.target.value)}
+            className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-primary"
+          >
+            <option value="">All genres</option>
+            {genreOptions.map((genre) => (
+              <option key={genre} value={genre}>
+                {genre}
+              </option>
+            ))}
+          </select>
         </div>
-      )}
 
-      {isLoading && <p className="text-gray-500">Loading movies...</p>}
-
-      {isError && (
-        <p className="text-red-600">
-          Failed to load movies: {error?.status ?? "unknown error"}
-        </p>
-      )}
-
-      {movies && movies.length === 0 && (
-        <p className="text-gray-500">No movies match your filters.</p>
-      )}
-
-      {movies && movies.length > 0 && (
-        <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-          {movies.map((movie) => (
-            <li
-              key={movie._id}
-              className="overflow-hidden rounded-md bg-white shadow-sm ring-1 ring-gray-100"
+        {activeFilters.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            {activeFilters.map((key) => (
+              <span
+                key={key}
+                className="flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
+              >
+                {key}: {filters[key]}
+                <button
+                  type="button"
+                  aria-label={`Clear ${key} filter`}
+                  onClick={() => handleFilterChange(key, "")}
+                  className="font-bold"
+                >
+                  &times;
+                </button>
+              </span>
+            ))}
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="text-xs font-medium text-gray-500 underline"
             >
-              <Link to={`/movies/${movie._id}`} className="block">
-                <div className="relative aspect-[2/3] bg-gray-100">
-                  {movie.posterUrl ? (
-                    <img
-                      src={movie.posterUrl}
-                      alt={movie.title}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
-                      No poster
-                    </div>
-                  )}
-                  {typeof movie.rating === "number" && (
-                    <span className="absolute right-1.5 top-1.5 rounded-full bg-navy/90 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                      &#9733; {movie.rating}
-                    </span>
-                  )}
-                </div>
-                <div className="p-3">
-                  <p className="truncate font-medium text-gray-900">{movie.title}</p>
-                  <p className="truncate text-xs text-gray-500">{movie.genres?.join(", ")}</p>
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+              Clear all
+            </button>
+          </div>
+        )}
+
+        {isLoading && <p className="text-gray-500">Loading movies...</p>}
+
+        {isError && (
+          <p className="text-red-600">
+            Failed to load movies: {error?.status ?? "unknown error"}
+          </p>
+        )}
+
+        {movies && movies.length === 0 && (
+          <p className="text-gray-500">No movies match your filters.</p>
+        )}
+
+        <MovieRow title="Recommended Movies" movies={movies} />
+        <MovieRow title="Top Rated" movies={topRatedMovies} />
+      </section>
+    </>
   );
 };
 

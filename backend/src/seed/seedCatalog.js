@@ -44,6 +44,16 @@ const TMDB_SEED_TITLES = [
   "The Shawshank Redemption",
   "Avengers: Endgame",
   "La La Land",
+  // Second batch — 15 -> 24 movies, same Bollywood/Hollywood mix.
+  "RRR",
+  "Kabir Singh",
+  "Bajrangi Bhaijaan",
+  "Barfi!",
+  "The Matrix",
+  "Parasite",
+  "Spider-Man: No Way Home",
+  "Pulp Fiction",
+  "Whiplash",
 ];
 
 const sampleTheaters = [
@@ -105,15 +115,26 @@ const seedTmdbMovies = async () => {
     const { title, year } = typeof entry === "string" ? { title: entry, year: undefined } : entry;
 
     const existing = await Movie.findOne({ title: { $regex: `^${title}$`, $options: "i" } });
-    if (existing) {
+    // Fully idempotent skip only once a movie has a backdrop — an existing
+    // movie from before backdropUrl existed still needs one more TMDB call
+    // to backfill it, but that's the only field this patches; everything
+    // else about an already-seeded movie is left alone.
+    if (existing && existing.backdropUrl) {
       movieDocs.push(existing);
       continue;
     }
 
     const data = await getMovieForSeed(title, year);
-    const movie = await Movie.create(data);
-    movieDocs.push(movie);
-    console.log(`Fetched and saved "${movie.title}" from TMDB.`);
+    if (existing) {
+      existing.backdropUrl = data.backdropUrl;
+      await existing.save();
+      movieDocs.push(existing);
+      console.log(`Backfilled backdropUrl for "${existing.title}".`);
+    } else {
+      const movie = await Movie.create(data);
+      movieDocs.push(movie);
+      console.log(`Fetched and saved "${movie.title}" from TMDB.`);
+    }
   }
   return movieDocs;
 };

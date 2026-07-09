@@ -1,5 +1,9 @@
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500";
+// Wider than the poster size — backdrops are used full-bleed (hero
+// carousel, detail page banner), so a w500 poster-sized image would look
+// visibly soft stretched across a whole viewport width.
+const TMDB_BACKDROP_BASE_URL = "https://image.tmdb.org/t/p/w1280";
 
 // TMDB's original_language is an ISO 639-1 code; the app's Movie schema
 // stores a free-text display name, so only the languages this catalog
@@ -15,6 +19,7 @@ const LANGUAGE_NAMES = {
   bn: "Bengali",
   mr: "Marathi",
   ur: "Urdu",
+  ko: "Korean",
 };
 
 const CERTIFICATIONS = ["U", "UA", "A"];
@@ -115,6 +120,7 @@ export const getMovieForSeed = async (title, year) => {
     rating: details.vote_average,
     castList,
     posterUrl: details.poster_path ? `${TMDB_IMAGE_BASE_URL}${details.poster_path}` : undefined,
+    backdropUrl: details.backdrop_path ? `${TMDB_BACKDROP_BASE_URL}${details.backdrop_path}` : undefined,
     isActive: true,
   };
 };

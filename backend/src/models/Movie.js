@@ -10,6 +10,9 @@ const movieSchema = new mongoose.Schema(
     certification: { type: String, enum: ["U", "UA", "A"] },
     releaseDate: { type: Date },
     posterUrl: { type: String, trim: true },
+    // Wider than the poster — used for the home page hero carousel and the
+    // detail page's banner, not for the movie card grid.
+    backdropUrl: { type: String, trim: true },
     rating: { type: Number, min: 0, max: 10 },
     castList: [{ type: String, trim: true }],
     isActive: { type: Boolean, default: true },
