@@ -9,6 +9,8 @@ import ThemedSelect from "./ThemedSelect.jsx";
 
 const uniqueSorted = (values) => Array.from(new Set(values.filter(Boolean))).sort();
 
+const ADMIN_ROLES = ["super_admin", "theater_admin"];
+
 const Navbar = () => {
   const { data: user } = useGetMeQuery();
   const [logout] = useLogoutMutation();
@@ -95,6 +97,14 @@ const Navbar = () => {
             >
               My Bookings
             </Link>
+            {ADMIN_ROLES.includes(user.role) && (
+              <Link
+                to="/admin"
+                className="text-sm font-medium text-primary transition-colors hover:text-primary-dark"
+              >
+                Admin
+              </Link>
+            )}
             {/* A greeting, not an action — stays neutral rather than
                 competing with the actual nav links/buttons for attention. */}
             <span className="hidden text-sm text-gray-500 md:inline">Hi, {user.name}</span>
