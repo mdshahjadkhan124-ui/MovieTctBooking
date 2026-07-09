@@ -30,7 +30,7 @@ const HeroCarousel = ({ movies }) => {
 
   return (
     <div
-      className="relative h-[280px] w-full overflow-hidden bg-navy sm:h-[380px] md:h-[440px]"
+      className="relative h-[280px] w-full overflow-hidden rounded-lg bg-navy sm:h-[380px] md:h-[440px]"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >

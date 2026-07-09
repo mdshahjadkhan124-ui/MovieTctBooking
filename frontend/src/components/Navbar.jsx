@@ -5,6 +5,7 @@ import { useGetMeQuery, useLogoutMutation } from "../api/authApi.js";
 import { useGetTheatersQuery } from "../api/theatersApi.js";
 import { useDebouncedValue } from "../utils/useDebouncedValue.js";
 import { setCity } from "../features/city/citySlice.js";
+import ThemedSelect from "./ThemedSelect.jsx";
 
 const uniqueSorted = (values) => Array.from(new Set(values.filter(Boolean))).sort();
 
@@ -62,15 +63,20 @@ const Navbar = () => {
             placeholder="Search for movies, events, plays..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="w-full rounded-md border border-gray-200 bg-surface px-4 py-2 text-sm outline-none focus:border-primary"
+            className="w-full rounded-md border border-gray-300 bg-surface px-4 py-2 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
           />
         </div>
 
-        <select
+        <ThemedSelect
           value={selectedCity}
           onChange={(e) => dispatch(setCity(e.target.value))}
           aria-label="Select city"
-          className="hidden shrink-0 rounded-md border-none bg-transparent text-sm font-medium text-gray-700 outline-none md:block"
+          // !important — ThemedSelect's own wrapper already carries an
+          // unconditional `inline-block`, which is equal-specificity with
+          // (and, depending on Tailwind's generated rule order, can beat)
+          // a plain `hidden`. Marking these !important guarantees the
+          // responsive show/hide always wins regardless of that ordering.
+          className="!hidden shrink-0 font-medium md:!block"
         >
           <option value="">All Cities</option>
           {cityOptions.map((city) => (
@@ -78,7 +84,7 @@ const Navbar = () => {
               {city}
             </option>
           ))}
-        </select>
+        </ThemedSelect>
 
         {user ? (
           <div className="flex shrink-0 items-center gap-3">

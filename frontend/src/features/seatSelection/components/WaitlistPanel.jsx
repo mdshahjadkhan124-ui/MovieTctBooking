@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useJoinWaitlistMutation, useLeaveWaitlistMutation } from "../../../api/waitlistApi.js";
+import ThemedSelect from "../../../components/ThemedSelect.jsx";
 
 const SEAT_OPTIONS = [1, 2, 3, 4];
 
@@ -55,17 +56,16 @@ const WaitlistPanel = ({ showtimeId, myStatus, onChanged }) => {
     <div className="mx-4 mt-4 flex flex-col gap-2 rounded-md border border-gray-200 bg-surface px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-2">
         <p className="text-sm text-gray-700">This showtime is full. Join the waitlist:</p>
-        <select
+        <ThemedSelect
           value={seatsRequested}
           onChange={(e) => setSeatsRequested(Number(e.target.value))}
-          className="rounded-md border border-gray-300 px-2 py-1 text-sm"
         >
           {SEAT_OPTIONS.map((n) => (
             <option key={n} value={n}>
               {n} seat{n > 1 ? "s" : ""}
             </option>
           ))}
-        </select>
+        </ThemedSelect>
       </div>
       <div className="flex items-center gap-3">
         {error && <p className="text-xs text-red-600">{error}</p>}

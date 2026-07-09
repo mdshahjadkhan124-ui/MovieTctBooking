@@ -3,6 +3,7 @@ import { useSelector } from "react-redux";
 import { useGetMoviesQuery } from "../api/moviesApi.js";
 import HeroCarousel from "../features/movies/components/HeroCarousel.jsx";
 import MovieRow from "../features/movies/components/MovieRow.jsx";
+import ThemedSelect from "../components/ThemedSelect.jsx";
 
 // City is deliberately not in here — it's a navbar-level preference (see
 // features/city/citySlice.js), not a page filter you'd want cleared by
@@ -49,79 +50,85 @@ const HomePage = () => {
 
   return (
     <>
-      {!isLoading && !isError && heroMovies.length > 0 && <HeroCarousel movies={heroMovies} />}
+      {!isLoading && !isError && heroMovies.length > 0 && (
+        <div className="px-0 pt-4 sm:px-4 sm:pt-6 md:px-8">
+          <div className="mx-auto max-w-7xl">
+            <HeroCarousel movies={heroMovies} />
+          </div>
+        </div>
+      )}
 
       <section className="bg-surface px-4 py-8 md:px-8">
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <select
-            value={filters.language}
-            onChange={(e) => handleFilterChange("language", e.target.value)}
-            className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-primary"
-          >
-            <option value="">All languages</option>
-            {languageOptions.map((language) => (
-              <option key={language} value={language}>
-                {language}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={filters.genre}
-            onChange={(e) => handleFilterChange("genre", e.target.value)}
-            className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-primary"
-          >
-            <option value="">All genres</option>
-            {genreOptions.map((genre) => (
-              <option key={genre} value={genre}>
-                {genre}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {activeFilters.length > 0 && (
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            {activeFilters.map((key) => (
-              <span
-                key={key}
-                className="flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
-              >
-                {key}: {filters[key]}
-                <button
-                  type="button"
-                  aria-label={`Clear ${key} filter`}
-                  onClick={() => handleFilterChange(key, "")}
-                  className="font-bold"
-                >
-                  &times;
-                </button>
-              </span>
-            ))}
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="text-xs font-medium text-gray-500 underline"
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <ThemedSelect
+              value={filters.language}
+              onChange={(e) => handleFilterChange("language", e.target.value)}
             >
-              Clear all
-            </button>
+              <option value="">All languages</option>
+              {languageOptions.map((language) => (
+                <option key={language} value={language}>
+                  {language}
+                </option>
+              ))}
+            </ThemedSelect>
+
+            <ThemedSelect
+              value={filters.genre}
+              onChange={(e) => handleFilterChange("genre", e.target.value)}
+            >
+              <option value="">All genres</option>
+              {genreOptions.map((genre) => (
+                <option key={genre} value={genre}>
+                  {genre}
+                </option>
+              ))}
+            </ThemedSelect>
           </div>
-        )}
 
-        {isLoading && <p className="text-gray-500">Loading movies...</p>}
+          {activeFilters.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              {activeFilters.map((key) => (
+                <span
+                  key={key}
+                  className="flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
+                >
+                  {key}: {filters[key]}
+                  <button
+                    type="button"
+                    aria-label={`Clear ${key} filter`}
+                    onClick={() => handleFilterChange(key, "")}
+                    className="font-bold"
+                  >
+                    &times;
+                  </button>
+                </span>
+              ))}
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="text-xs font-medium text-gray-500 underline"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
 
-        {isError && (
-          <p className="text-red-600">
-            Failed to load movies: {error?.status ?? "unknown error"}
-          </p>
-        )}
+          {isLoading && <p className="text-gray-500">Loading movies...</p>}
 
-        {movies && movies.length === 0 && (
-          <p className="text-gray-500">No movies match your filters.</p>
-        )}
+          {isError && (
+            <p className="text-red-600">
+              Failed to load movies: {error?.status ?? "unknown error"}
+            </p>
+          )}
 
-        <MovieRow title="Recommended Movies" movies={movies} />
-        <MovieRow title="Top Rated" movies={topRatedMovies} />
+          {movies && movies.length === 0 && (
+            <p className="text-gray-500">No movies match your filters.</p>
+          )}
+
+          <MovieRow title="Recommended Movies" movies={movies} />
+          <MovieRow title="Top Rated" movies={topRatedMovies} />
+        </div>
       </section>
     </>
   );
