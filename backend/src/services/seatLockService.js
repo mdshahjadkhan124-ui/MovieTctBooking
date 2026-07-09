@@ -97,6 +97,20 @@ export const releaseLocksByToken = async (showtimeId, token) => {
   return released;
 };
 
+/**
+ * Test-only: shortens the remaining TTL on already-acquired locks so a test
+ * can wait out a real expiry without either (a) acquiring with a TTL so
+ * short it expires mid-setup against real network latency, or (b) sleeping
+ * for the full production TTL. Acquire normally, do whatever slow setup is
+ * needed, then call this right before the point where expiry should matter.
+ */
+export const shortenLockTtlForTests = async (showtimeId, seatIds, ttlMs) => {
+  const client = getRedisClient();
+  await Promise.all(
+    seatIds.map((seatId) => client.pExpire(lockKey(showtimeId, seatId), ttlMs))
+  );
+};
+
 /** Seat IDs currently locked (by anyone) for a showtime. */
 export const getLockedSeatIds = async (showtimeId) => {
   const client = getRedisClient();

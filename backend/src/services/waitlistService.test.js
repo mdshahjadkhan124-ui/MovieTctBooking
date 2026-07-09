@@ -247,19 +247,29 @@ describe("waitlist: cancellation-driven notification + fulfillment", () => {
 describe("waitlist: hold expiry advances the offer to the next eligible user", () => {
   it("an expired, unbooked offer is released and passed to the next waiting entry", async () => {
     const showtime = await makeShowtime(screenSmall); // seats: A1, A2
-    const shortTtl = 250;
+    // Generous so userB's real Redis lock (acquired below) stays alive for
+    // the rest of the test regardless of network latency — userA's offer is
+    // made to look expired by backdating its Mongo `notifiedAt` directly,
+    // not by racing a short TTL against wall-clock time.
+    const holdTtlMs = 5000;
 
     await waitlistService.joinWaitlist(userA, showtime._id.toString(), 1);
     await sleep(20);
     await waitlistService.joinWaitlist(userB, showtime._id.toString(), 1);
 
-    await waitlistService.processWaitlist(showtime._id.toString(), { holdTtlMs: shortTtl });
+    await waitlistService.processWaitlist(showtime._id.toString(), { holdTtlMs });
     const firstOffer = await waitlistService.getMyWaitlistStatus(userA, showtime._id.toString());
     expect(firstOffer.status).toBe("notified");
     const heldSeat = firstOffer.heldSeatIds[0];
 
-    await sleep(shortTtl + 150);
-    await waitlistService.processWaitlist(showtime._id.toString(), { holdTtlMs: shortTtl });
+    // reconcileExpiredNotifications decides staleness purely from
+    // `notifiedAt` vs. `now - holdTtlMs` (see waitlistService.js) — backdate
+    // it directly so the offer is deterministically treated as expired.
+    await WaitlistEntry.updateOne(
+      { user: userA, showtime: showtime._id, status: "notified" },
+      { notifiedAt: new Date(Date.now() - holdTtlMs - 1000) }
+    );
+    await waitlistService.processWaitlist(showtime._id.toString(), { holdTtlMs });
 
     const expiredA = await waitlistService.getMyWaitlistStatus(userA, showtime._id.toString());
     expect(expiredA).toBeNull(); // no longer an active (waiting/notified) entry

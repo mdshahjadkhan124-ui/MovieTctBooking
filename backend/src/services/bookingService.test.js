@@ -124,6 +124,19 @@ const failedEvent = (paymentIntent) => ({
   data: { object: paymentIntent },
 });
 
+// Polls actual Redis state instead of sleeping a fixed duration — a fixed
+// sleep has to guess how long expiry + network latency will take, which is
+// exactly what makes TTL tests flaky against a remote (Upstash) Redis.
+const waitForLockExpiry = async (showtimeId, seatIds, { timeoutMs = 5000, intervalMs = 50 } = {}) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const locked = await seatLockService.getLockedSeatIds(showtimeId);
+    if (seatIds.every((seatId) => !locked.includes(seatId))) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Locks for ${seatIds.join(", ")} did not expire within ${timeoutMs}ms`);
+};
+
 // Full lock -> checkout -> real Stripe confirm -> webhook-relayed confirm,
 // used by the cancellation tests below, which only care about what happens
 // after a booking is already genuinely "confirmed".
@@ -179,11 +192,15 @@ describe("booking checkout + Stripe webhook", () => {
 
   it("expired lock at webhook time -> booking failed + refund issued", async () => {
     const seatIds = ["B1", "B2"];
+    // Acquire with the real TTL so the slow setup below (checkout + a real
+    // Stripe confirm round-trip) can't itself race the expiry we're trying
+    // to test. Only once setup is done do we shrink the TTL, so the window
+    // for "genuinely expired" is deterministic rather than a guess about
+    // how fast the network will be.
     const lockResult = await seatLockService.acquireLocks(
       showtime._id.toString(),
       seatIds,
-      userId,
-      { ttlMs: 150 }
+      userId
     );
     expect(lockResult.success).toBe(true);
 
@@ -198,9 +215,11 @@ describe("booking checkout + Stripe webhook", () => {
       payment_method: "pm_card_visa",
     });
 
-    // Let the lock TTL genuinely expire before the webhook is processed —
-    // simulating a user who paid just as their hold ran out.
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    // Now that setup is complete, shorten the TTL and poll until the locks
+    // have genuinely expired in Redis — simulating a user who paid just as
+    // their hold ran out, without hardcoding how long that takes.
+    await seatLockService.shortenLockTtlForTests(showtime._id.toString(), seatIds, 50);
+    await waitForLockExpiry(showtime._id.toString(), seatIds);
 
     const { status } = await signAndPost(succeededEvent(confirmedIntent));
     expect(status).toBe(200);
