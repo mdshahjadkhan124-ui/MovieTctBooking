@@ -32,10 +32,11 @@ unprompted — implement the agreed plan and flag concerns.
 
 | Layer | Technology |
 |---|---|
-| Frontend | React, Redux Toolkit, React Router, Tailwind CSS |
+| Frontend | React, Redux Toolkit, React Router, Tailwind CSS, Recharts (admin analytics) |
 | Backend | Node.js, Express |
 | Database | MongoDB with Mongoose |
 | Caching / seat locking | Redis (TTL keys) |
+| Real-time | Socket.io (live seat lock broadcasts) |
 | Auth | JWT + bcrypt, role-based |
 | Payments | Stripe (test mode) |
 | Extras | QR code generation for e-tickets |
@@ -46,7 +47,13 @@ unprompted — implement the agreed plan and flag concerns.
 
 ## 3. Data Model (entities)
 
-`User`, `Movie`, `Theater`, `Screen`, `Showtime`, `Seat`, `Booking`.
+`User`, `Movie`, `Theater`, `Screen`, `Showtime`, `Booking`, `WaitlistEntry`.
+
+There is no separate `Seat` collection — a screen's seat layout (`rows`,
+`columns`, `seatCategories`, `unavailableSeats`) is a compact config object
+embedded directly in `Screen`, and the seat grid is built fresh from it at
+request time (`buildSeatGrid`). Don't add a `Seat` model; there's nothing to
+keep in sync between it and a config-derived grid.
 
 Exact schema shapes are finalized per-sprint in planning. Do not invent fields
 — if a field is needed that isn't in the agreed schema, ask first.
@@ -61,8 +68,12 @@ Exact schema shapes are finalized per-sprint in planning. Do not invent fields
 4. Seat recommendation engine — ✅ DONE
 5. Seat locking (concurrency-safe, Redis TTL keys) — ✅ DONE
 6. Booking-commit flow (locks → Mongo Booking, concurrency-safe) + Stripe payment (test mode) + booking confirmation — ✅ DONE
-7. Polish: search / filter, booking history, e-ticket with QR code, wire `GET /locks` into the seat grid — 🔜 CURRENT
-8. Testing + deployment
+7. Polish: search / filter, booking history, e-ticket with QR code, wire `GET /locks` into the seat grid — ✅ DONE
+8. Testing + deployment — ✅ DONE (81 backend tests incl. concurrency/idempotency races, deployed live: Vercel + Render + Atlas + Upstash)
+
+No sprint is currently active — later work (UI redesign, city/theater density,
+frontend performance, test isolation, dependency audit) happened ad hoc
+outside this sprint structure. Ask before assuming what's next.
 
 Only build the current sprint unless told otherwise. Don't scaffold future
 sprints ahead of time.
@@ -84,17 +95,19 @@ sprints ahead of time.
     /middleware      # auth, role guards, error handler, validation
     /utils           # helpers (JWT, QR, etc.)
     /validators      # request body/param validation schemas
+    /seed            # one-off scripts: admin user, TMDB catalog, analytics demo data
     app.js           # express app wiring
     server.js        # entry point
-  /tests
+  vitest.global-setup.js  # spins up the isolated in-memory MongoDB tests run against
 /frontend
   /src
     /app             # redux store setup
+    /admin           # admin-only routes/pages/components (lazy-loaded, not in the initial bundle)
     /features        # redux slices + feature components (auth, movies, booking…)
     /components      # shared/presentational components
-    /pages           # route-level pages
-    /api             # RTK Query / axios API layer
-    /hooks
+    /pages           # route-level pages (all but HomePage are lazy-loaded — see App.jsx)
+    /api             # RTK Query API layer
+    /lib             # small standalone clients (socket.io, Stripe)
     /utils
 ```
 
@@ -181,13 +194,25 @@ Never commit real values. Keep `.env.example` current. Expected keys:
 ```
 PORT=
 MONGO_URI=
+NODE_ENV=
+CLIENT_URL=
 JWT_SECRET=
 JWT_EXPIRES_IN=
+SEED_ADMIN_EMAIL=
+SEED_ADMIN_PASSWORD=
 REDIS_URL=
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
-CLIENT_URL=
+TMDB_API_KEY=          # only needed for `npm run seed:catalog`
+RATE_LIMIT_WINDOW_MS=  # optional — see middleware/rateLimiters.js
+RATE_LIMIT_MAX=
+AUTH_RATE_LIMIT_WINDOW_MS=
+AUTH_RATE_LIMIT_MAX=
 ```
+
+`MONGO_URI` is not needed to run the backend test suite — tests connect to an
+isolated in-memory MongoDB instead (`vitest.global-setup.js`); it's only for
+`npm run dev` and the seed scripts.
 
 ---
 
@@ -215,5 +240,7 @@ on them:
 - Why Redis (not a DB flag) for seat locking; what the TTL protects against.
 - How the recommendation engine's sliding window works and its time complexity.
 - 401 vs 403, and where ownership checks live.
+- Why the test suite uses an isolated in-memory MongoDB instead of the shared dev database — and the specific flaky test (an analytics ranking assertion) that motivated it.
+- Why route-based code splitting (`React.lazy`), not just "the app was slow" — what was actually in the initial bundle that didn't need to be, and the measured before/after.
 
 If a shortcut would undermine one of these, flag it instead of silently taking it.

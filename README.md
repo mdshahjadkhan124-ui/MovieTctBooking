@@ -13,7 +13,7 @@ A full-stack MERN movie ticket booking platform — real-time seat selection wit
 
 **[movie-tct-booking.vercel.app](https://movie-tct-booking.vercel.app)**
 
-> The backend is hosted on Render's free tier, which spins down after inactivity — the **first request can take ~30-50 seconds** to wake it up. Subsequent requests are fast. If the seat map or movie list looks empty on first load, give it a moment and refresh.
+> The backend is hosted on Render's free tier, which spins down after inactivity — the **first request can take ~30-50 seconds** to wake it up. Subsequent requests are fast. The home page shows a layout-matched loading skeleton rather than a blank screen while this resolves, so it reads as "loading," not "broken" — but if the seat map or movie list still looks empty on first load, give it a moment and refresh.
 
 ---
 
@@ -23,6 +23,8 @@ A full-stack MERN movie ticket booking platform — real-time seat selection wit
   Drop images into docs/screenshots/ with these filenames and they'll render
   automatically below.
 -->
+
+> ⚠️ **`home.png`, `seat-selection.png`, and `e-ticket.png` are outdated** — they predate the navbar/home page redesign (clean, minimal institutional theme) and still show the old header. `admin-dashboard.png` and `analytics.png` are unaffected — the admin dashboard uses its own layout, not the public navbar, and wasn't touched by the redesign.
 
 | | |
 |---|---|
@@ -39,6 +41,7 @@ A full-stack MERN movie ticket booking platform — real-time seat selection wit
 
 ### For moviegoers
 - Browse movies with search, city/genre filters, and a hero carousel of featured titles
+- Movie detail page's showtimes are filtered live to your selected city and grouped by theater (by city, then theater, when browsing "All Cities") — no re-filtering across theaters you can't actually get to
 - Real-time seat map — see other users' locks appear/disappear live via Socket.io
 - **Smart seat recommendation** — "pick my seats" finds the best block for a group in one click
 - Transparent, itemized price breakdown per seat before paying (occupancy, position, time-of-day)
@@ -86,6 +89,10 @@ Revenue, top movies, occupancy, peak booking hours, and per-theater performance 
 - `helmet` for security headers (CSP, HSTS, X-Frame-Options, disabled `X-Powered-By`).
 - A **custom NoSQL-injection sanitizer**, hand-rolled because `express-mongo-sanitize` mutates `req.query`/`req.params` by reassignment — which throws under Express 5, where both are read-only getters. This sanitizer mutates matched objects' own properties in place instead, so it works correctly regardless of Express version, stripping any `$`-prefixed operator key or dotted field path recursively through body/query/params.
 - `app.set('trust proxy', 1)` in production — Render sits in front of the app as a reverse proxy, and without trusting it `req.ip` resolves to the proxy's own address for every request, which would make the rate limiter key on one "client" for the entire internet instead of the real caller.
+- Dependency vulnerabilities are triaged, not just patched on autopilot — `npm audit` currently reports **0 vulnerabilities**, but the last batch of 5 (all transitive, none direct dependencies) was reviewed rather than blindly `--force`-fixed: only the ones actually reachable in the deployed request path (`socket.io-parser`'s frame parser on the unauthenticated WebSocket endpoint, `express-rate-limit`'s IP-classification dependency) were treated as real risk; the rest were dev/test tooling (`nodemon`, `vitest`'s internal `vite`) with no runtime exposure. All 5 resolved with non-breaking patch/minor bumps — none required a major-version jump.
+
+### Frontend Performance
+Every route except the home page — movie detail, seat selection, auth, bookings, and the entire admin dashboard (including Recharts, which only the admin dashboard needs) — is behind `React.lazy` + `Suspense`, so a first-time visitor's initial JS payload only includes what the home page actually needs. Measured on the same production build: **852 KB → 337 KB raw, 248 KB → 108 KB gzipped — about 60% smaller.** Below-the-fold movie posters use native `loading="lazy"` (verified: the in-viewport row loads immediately, the row below the fold doesn't fetch until scrolled near); the hero carousel's image is marked `fetchPriority="high"` as the page's LCP element; and the home page renders a skeleton sized to match the real layout instead of a blank gap while data loads — most noticeable during the Render cold start described above.
 
 ### Cross-Domain Auth
 Sessions are httpOnly JWT cookies (never exposed to client JS, immune to XSS token theft). Cookie flags are environment-aware: `sameSite: 'strict'` and `secure: false` in local dev (both frontend and backend on `localhost`), switching to `sameSite: 'none'` + `secure: true` in production — required because the Vercel frontend and Render backend are genuinely different origins, and a cross-site cookie needs both flags set correctly or browsers silently drop it.
@@ -106,7 +113,7 @@ The movie catalog is real data (titles, posters, cast, ratings, certification) f
 | Payments | Stripe (test mode), webhook-driven commit |
 | Real-time | Socket.io |
 | Auth | JWT (httpOnly cookies) + bcrypt, role-based access control |
-| Testing | Vitest — 81 tests against real MongoDB Atlas, Redis, and Stripe test-mode |
+| Testing | Vitest — 81 tests; isolated in-memory MongoDB (`mongodb-memory-server`) for deterministic runs, real Upstash Redis + Stripe test-mode for everything else |
 | Infra | Vercel (frontend), Render (backend), MongoDB Atlas, Upstash Redis |
 
 ---
@@ -137,7 +144,9 @@ Theater ──< Screen ──< Showtime >── Movie
 
 ## ✅ Testing
 
-**81 tests, all passing**, run with Vitest against **real infrastructure** — an actual MongoDB Atlas cluster, a real Upstash Redis instance, and Stripe's real test-mode API — not mocks. That was a deliberate choice: mocked integration tests can pass while the real integration is broken (a schema drift, a Redis command that doesn't do quite what you assumed); hitting the genuine services in tests catches that class of bug before production does.
+**81 tests, all passing**, run with Vitest against **real Redis (Upstash) and Stripe's real test-mode API** — not mocks. That's a deliberate choice: a mocked integration test can pass while the real integration is broken (a Redis command that doesn't do quite what you assumed, a Stripe webhook payload shape that changed) — hitting the genuine services catches that class of bug before production does.
+
+MongoDB is the one exception, and it's isolated on purpose: every test run spins up a fresh **in-memory MongoDB** (`mongodb-memory-server`, wired in via a Vitest `globalSetup`) instead of connecting to the shared dev database. That fixed a real, previously-flaky test: an analytics query asserting "my 3 low-volume fixture movies rank in the global top-N" would eventually fail on its own as real seed data grew and crowded them out of the ranking — not a bug in the app, but the test wasn't isolated. An in-memory instance sidesteps that permanently without weakening the assertion, and as a side effect, running `npm test` locally needs no real `MONGO_URI` at all.
 
 | Area | Coverage |
 |---|---|
@@ -195,6 +204,8 @@ cd backend && npm test     # 81 backend tests
 cd frontend && npm test    # frontend unit tests (seat grid construction)
 ```
 
+Backend tests run against an isolated, in-memory MongoDB spun up automatically — no real `MONGO_URI` needed just to run `npm test` (see the Testing section above for why).
+
 ---
 
 ## 🚀 Deployment
@@ -224,6 +235,8 @@ Set `NODE_ENV=production` on the backend — this switches the auth cookie to `s
 | `SEED_ADMIN_PASSWORD` | |
 | `STRIPE_SECRET_KEY` | |
 | `STRIPE_WEBHOOK_SECRET` | From the Stripe dashboard's webhook endpoint for the deployed URL |
+| `TMDB_API_KEY` | Only needed if running `npm run seed:catalog` against this environment |
+| `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_WINDOW_MS`, `AUTH_RATE_LIMIT_MAX` | Optional — sensible defaults apply if unset (see `middleware/rateLimiters.js`) |
 
 ### Frontend (Vercel) env vars
 
