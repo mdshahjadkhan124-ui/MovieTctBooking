@@ -11,7 +11,13 @@ const MovieCard = ({ movie }) => (
   <Link to={`/movies/${movie._id}`} className="group block w-40 shrink-0 sm:w-48">
     <div className="relative aspect-[2/3] overflow-hidden rounded-md border border-gray-200 bg-gray-100 transition-shadow duration-200 group-hover:shadow-md">
       {movie.posterUrl ? (
-        <img src={movie.posterUrl} alt={movie.title} className="h-full w-full object-cover" />
+        <img
+          src={movie.posterUrl}
+          alt={movie.title}
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-cover"
+        />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
           No poster

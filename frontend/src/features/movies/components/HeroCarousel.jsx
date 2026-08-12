@@ -39,6 +39,9 @@ const HeroCarousel = ({ movies }) => {
           key={movie._id}
           src={movie.backdropUrl || movie.posterUrl}
           alt={movie.title}
+          // This is the page's LCP element — the opposite of the lazy
+          // loading used for below-the-fold poster grids elsewhere.
+          fetchPriority="high"
           className="absolute inset-0 h-full w-full object-cover motion-safe:animate-[fade-in_700ms_ease-out]"
         />
       ) : (
