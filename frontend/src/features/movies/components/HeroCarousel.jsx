@@ -30,7 +30,7 @@ const HeroCarousel = ({ movies }) => {
 
   return (
     <div
-      className="relative h-[280px] w-full overflow-hidden rounded-lg bg-navy sm:h-[380px] md:h-[440px]"
+      className="relative h-[320px] w-full overflow-hidden bg-navy sm:h-[420px] md:h-[480px]"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >
@@ -39,18 +39,21 @@ const HeroCarousel = ({ movies }) => {
           key={movie._id}
           src={movie.backdropUrl || movie.posterUrl}
           alt={movie.title}
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-cover motion-safe:animate-[fade-in_700ms_ease-out]"
         />
       ) : (
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/80 to-navy" />
+        <div className="absolute inset-0 bg-navy" />
       )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
+      {/* Flat wash for overall legibility, plus a tighter bottom gradient
+          just behind the text block — restrained, not a heavy scrim. */}
+      <div className="absolute inset-0 bg-black/25" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
 
-      <div className="absolute bottom-0 left-0 flex max-w-xl flex-col gap-2 p-6 text-white sm:p-10">
-        <h2 className="text-2xl font-bold sm:text-4xl">{movie.title}</h2>
-        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-200">
+      <div className="absolute inset-x-0 bottom-0 mx-auto flex w-full max-w-7xl flex-col gap-3 px-6 pb-10 text-white sm:px-10 sm:pb-14">
+        <h2 className="max-w-2xl text-3xl font-bold tracking-tight sm:text-5xl">{movie.title}</h2>
+        <div className="flex flex-wrap items-center gap-3 text-sm text-gray-200">
           {typeof movie.rating === "number" && (
-            <span className="flex items-center gap-1 font-semibold text-yellow-400">
+            <span className="flex items-center gap-1 font-medium text-white">
               &#9733; {movie.rating.toFixed(1)}
             </span>
           )}
@@ -58,7 +61,7 @@ const HeroCarousel = ({ movies }) => {
         </div>
         <Link
           to={`/movies/${movie._id}`}
-          className="mt-2 w-fit rounded-md bg-primary px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary/90"
+          className="mt-3 w-fit rounded-md bg-primary px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-dark"
         >
           Book Now
         </Link>
@@ -70,7 +73,7 @@ const HeroCarousel = ({ movies }) => {
             type="button"
             aria-label="Previous slide"
             onClick={() => goTo(index - 1)}
-            className="absolute left-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-lg text-white hover:bg-black/60"
+            className="absolute left-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/25 text-lg text-white transition-colors hover:border-white/50 hover:bg-white/10"
           >
             &#8249;
           </button>
@@ -78,19 +81,19 @@ const HeroCarousel = ({ movies }) => {
             type="button"
             aria-label="Next slide"
             onClick={() => goTo(index + 1)}
-            className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-lg text-white hover:bg-black/60"
+            className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/25 text-lg text-white transition-colors hover:border-white/50 hover:bg-white/10"
           >
             &#8250;
           </button>
-          <div className="absolute bottom-3 right-4 flex gap-1.5 sm:bottom-4">
+          <div className="absolute bottom-4 right-6 flex gap-2 sm:bottom-5 sm:right-10">
             {movies.map((m, i) => (
               <button
                 key={m._id}
                 type="button"
                 aria-label={`Go to slide ${i + 1}`}
                 onClick={() => goTo(i)}
-                className={`h-2 w-2 rounded-full transition-colors ${
-                  i === index ? "bg-primary" : "bg-white/50"
+                className={`h-1.5 rounded-full transition-all ${
+                  i === index ? "w-6 bg-primary" : "w-1.5 bg-white/40"
                 }`}
               />
             ))}

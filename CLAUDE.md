@@ -134,12 +134,24 @@ sprints ahead of time.
 - Presentational components stay dumb; data-fetching/state lives in feature
   components or hooks.
 
-**UI theme (homepage mockup already exists — match it):**
-- BookMyShow-style layout: sticky header (logo + search bar + city selector +
-  Sign in), hero carousel, "Recommended Movies" horizontal card row (poster,
-  rating badge, title, genre), gradient event-category cards, dark footer.
-- Palette: white background, accent red `#F84464`, dark navy footer, light gray
-  section backgrounds.
+**UI theme (redesigned for a clean, minimal, institutional/corporate feel —
+think polished university sites, not a consumer booking app):**
+- Generous white space, restrained neutral palette (white background, near-black
+  `gray-900` text), strong typographic hierarchy, minimal decoration (thin
+  borders/hairline dividers, very soft shadows — no gradients, glassmorphism,
+  or glow effects). Motion, if any, is a quiet `motion-safe:` fade, never bouncy.
+- Layout: sticky header with a thin `border-b` (no heavy shadow), logo +
+  primary nav + compact search + city selector + account controls, all aligned
+  to the same `max-w-7xl` grid as the page content. Full-bleed hero carousel
+  (edge-to-edge, no rounded corners) with a restrained legibility scrim and a
+  single primary CTA. Movie cards: thin border + soft shadow on hover only
+  (no image zoom, no full-card dark overlay). Section headings are large and
+  bold with a small `bg-primary` underline accent. Dark navy footer stays as
+  the one heavier-color surface in the page.
+- Palette: white background throughout (no shaded gray section blocks —
+  hairline `border-gray-100`/`gray-200` dividers do the separation instead),
+  accent red `#F84464` used sparingly (CTAs, active states, small underline
+  accents) rather than as a base UI color, dark navy footer.
 
 ---
 

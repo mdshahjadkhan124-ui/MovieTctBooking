@@ -16,3 +16,14 @@
 body {
   margin: 0;
 }
+
+/* Quiet crossfade for the hero carousel — `motion-safe:` (applied at the
+   call site) makes this a no-op under prefers-reduced-motion automatically. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

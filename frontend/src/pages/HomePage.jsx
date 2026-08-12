@@ -50,17 +50,11 @@ const HomePage = () => {
 
   return (
     <>
-      {!isLoading && !isError && heroMovies.length > 0 && (
-        <div className="px-0 pt-4 sm:px-4 sm:pt-6 md:px-8">
-          <div className="mx-auto max-w-7xl">
-            <HeroCarousel movies={heroMovies} />
-          </div>
-        </div>
-      )}
+      {!isLoading && !isError && heroMovies.length > 0 && <HeroCarousel movies={heroMovies} />}
 
-      <section className="bg-surface px-4 py-8 md:px-8">
+      <section className="bg-white px-4 py-12 md:px-8 md:py-16">
         <div className="mx-auto max-w-7xl">
-          <div className="mb-4 flex flex-wrap items-center gap-3">
+          <div className="mb-6 flex flex-wrap items-center gap-3 border-b border-gray-100 pb-8">
             <ThemedSelect
               value={filters.language}
               onChange={(e) => handleFilterChange("language", e.target.value)}
@@ -84,46 +78,46 @@ const HomePage = () => {
                 </option>
               ))}
             </ThemedSelect>
+
+            {activeFilters.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                {activeFilters.map((key) => (
+                  <span
+                    key={key}
+                    className="flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
+                  >
+                    {key}: {filters[key]}
+                    <button
+                      type="button"
+                      aria-label={`Clear ${key} filter`}
+                      onClick={() => handleFilterChange(key, "")}
+                      className="font-bold"
+                    >
+                      &times;
+                    </button>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="text-xs font-medium text-gray-500 underline"
+                >
+                  Clear all
+                </button>
+              </div>
+            )}
           </div>
 
-          {activeFilters.length > 0 && (
-            <div className="mb-4 flex flex-wrap items-center gap-2">
-              {activeFilters.map((key) => (
-                <span
-                  key={key}
-                  className="flex items-center gap-1 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
-                >
-                  {key}: {filters[key]}
-                  <button
-                    type="button"
-                    aria-label={`Clear ${key} filter`}
-                    onClick={() => handleFilterChange(key, "")}
-                    className="font-bold"
-                  >
-                    &times;
-                  </button>
-                </span>
-              ))}
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="text-xs font-medium text-gray-500 underline"
-              >
-                Clear all
-              </button>
-            </div>
-          )}
-
-          {isLoading && <p className="text-gray-500">Loading movies...</p>}
+          {isLoading && <p className="py-8 text-center text-gray-500">Loading movies...</p>}
 
           {isError && (
-            <p className="text-red-600">
+            <p className="py-8 text-center text-red-600">
               Failed to load movies: {error?.status ?? "unknown error"}
             </p>
           )}
 
           {movies && movies.length === 0 && (
-            <p className="text-gray-500">No movies match your filters.</p>
+            <p className="py-8 text-center text-gray-500">No movies match your filters.</p>
           )}
 
           <MovieRow title="Recommended Movies" movies={movies} />
