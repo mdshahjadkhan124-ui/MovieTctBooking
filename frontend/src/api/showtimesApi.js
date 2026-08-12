@@ -20,9 +20,16 @@ export const showtimesApi = apiSlice.injectEndpoints({
       transformResponse: (response) => response.data.lockedSeatIds,
     }),
     getShowtimesByMovie: builder.query({
-      query: (movieId) => ({ url: "/showtimes", params: { movie: movieId } }),
+      // `city` is the navbar's currently-selected city ("" means "All
+      // Cities") — omitted entirely rather than sent as "" so it matches
+      // the same "no filter" behavior the backend already gives a missing
+      // param, instead of relying on it also treating "" as falsy.
+      query: ({ movieId, city }) => ({
+        url: "/showtimes",
+        params: { movie: movieId, ...(city && { city }) },
+      }),
       transformResponse: (response) => response.data.showtimes,
-      providesTags: (result, error, movieId) => [{ type: "Showtime", id: `movie-${movieId}` }],
+      providesTags: (result, error, { movieId }) => [{ type: "Showtime", id: `movie-${movieId}` }],
     }),
     getSeatPricing: builder.query({
       query: (showtimeId) => `/showtimes/${showtimeId}/pricing`,
