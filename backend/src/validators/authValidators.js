@@ -36,7 +36,7 @@ export const validateLogin = (req, res, next) => {
 };
 
 export const validateCreateUser = (req, res, next) => {
-  const { name, email, password, role } = req.body;
+  const { name, email, password, role, theater } = req.body;
 
   if (!name || typeof name !== "string" || !name.trim()) {
     throw new AppError("Name is required", 400, "VALIDATION_ERROR");
@@ -53,6 +53,13 @@ export const validateCreateUser = (req, res, next) => {
   }
   if (role && !["theater_admin", "super_admin"].includes(role)) {
     throw new AppError("Invalid role", 400, "VALIDATION_ERROR");
+  }
+  if ((role || "theater_admin") === "theater_admin" && !theater) {
+    throw new AppError(
+      "A theater must be assigned for a theater_admin account",
+      400,
+      "VALIDATION_ERROR"
+    );
   }
 
   next();

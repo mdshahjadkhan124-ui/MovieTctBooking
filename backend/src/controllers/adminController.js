@@ -12,3 +12,8 @@ export const createUser = asyncHandler(async (req, res) => {
   });
   res.status(201).json({ success: true, data: { user }, message: "" });
 });
+
+export const listUsers = asyncHandler(async (req, res) => {
+  const users = await authService.listTheaterAdmins();
+  res.json({ success: true, data: { users }, message: "" });
+});

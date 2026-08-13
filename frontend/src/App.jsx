@@ -27,6 +27,7 @@ const AdminScreenFormPage = lazy(() => import("./admin/pages/AdminScreenFormPage
 const AdminShowtimesPage = lazy(() => import("./admin/pages/AdminShowtimesPage.jsx"));
 const AdminShowtimeFormPage = lazy(() => import("./admin/pages/AdminShowtimeFormPage.jsx"));
 const AdminAnalyticsPage = lazy(() => import("./admin/pages/AdminAnalyticsPage.jsx"));
+const AdminUsersPage = lazy(() => import("./admin/pages/AdminUsersPage.jsx"));
 
 // A blank screen while a route chunk downloads would read as a hang — this
 // is deliberately quiet/neutral rather than a branded splash, since it's
@@ -75,6 +76,7 @@ const App = () => {
             <Route path="showtimes/new" element={<AdminShowtimeFormPage />} />
             <Route path="showtimes/:id/edit" element={<AdminShowtimeFormPage />} />
             <Route path="analytics" element={<AdminAnalyticsPage />} />
+            <Route path="users" element={<AdminUsersPage />} />
           </Route>
         </Route>
       </Routes>

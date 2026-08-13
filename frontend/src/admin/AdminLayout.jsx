@@ -9,6 +9,11 @@ const NAV_LINKS = [
   { to: "/admin/analytics", label: "Analytics" },
 ];
 
+// Super_admin-only page — hidden from theater_admins in the sidebar. This is
+// UX only; the backend independently enforces super_admin on every /admin/users
+// request regardless of what the frontend shows.
+const SUPER_ADMIN_NAV_LINK = { to: "/admin/users", label: "Users" };
+
 const navLinkClass = ({ isActive }) =>
   `block rounded-md px-3 py-2 text-sm font-medium ${
     isActive ? "bg-primary text-white" : "text-gray-700 hover:bg-gray-100"
@@ -34,6 +39,11 @@ const AdminLayout = () => {
               {link.label}
             </NavLink>
           ))}
+          {user?.role === "super_admin" && (
+            <NavLink to={SUPER_ADMIN_NAV_LINK.to} className={navLinkClass}>
+              {SUPER_ADMIN_NAV_LINK.label}
+            </NavLink>
+          )}
         </nav>
       </aside>
 

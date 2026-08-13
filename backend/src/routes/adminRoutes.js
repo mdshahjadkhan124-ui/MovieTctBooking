@@ -6,6 +6,8 @@ import { validateCreateUser } from "../validators/authValidators.js";
 
 const router = Router();
 
+router.get("/users", protect, authorize("super_admin"), adminController.listUsers);
+
 router.post(
   "/users",
   protect,

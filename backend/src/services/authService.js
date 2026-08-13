@@ -51,4 +51,25 @@ export const createElevatedUser = async ({ name, email, password, role, theater 
   return toSafeUser(user);
 };
 
+export const listTheaterAdmins = async () => {
+  const users = await User.find({ role: "theater_admin" })
+    .populate("theater", "name location.city")
+    .sort({ createdAt: -1 });
+
+  return users.map((user) => ({
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    theater: user.theater
+      ? {
+          id: user.theater._id,
+          name: user.theater.name,
+          city: user.theater.location?.city,
+        }
+      : null,
+    createdAt: user.createdAt,
+  }));
+};
+
 export { toSafeUser };
