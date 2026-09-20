@@ -5,7 +5,7 @@ export const createTheater = (data) => Theater.create(data);
 
 export const updateTheater = async (id, updates) => {
   const theater = await Theater.findByIdAndUpdate(id, updates, {
-    new: true,
+    returnDocument: "after",
     runValidators: true,
   });
   if (!theater) throw new AppError("Theater not found", 404, "NOT_FOUND");

@@ -144,7 +144,7 @@ const reconcileExpiredNotifications = async (showtimeId, holdTtlMs) => {
     const claimed = await WaitlistEntry.findOneAndUpdate(
       { _id: entry._id, status: "notified" },
       { status: "expired" },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!claimed) continue;
 
@@ -204,7 +204,7 @@ export const processWaitlist = async (showtimeId, { holdTtlMs = WAITLIST_HOLD_TT
   const claimed = await WaitlistEntry.findOneAndUpdate(
     { _id: eligible._id, status: "waiting" },
     { status: "notified", notifiedAt, holdToken: lockResult.token, heldSeatIds: offeredSeatIds },
-    { new: true }
+    { returnDocument: "after" }
   );
   if (!claimed) {
     // Someone else (a concurrent processWaitlist call) already claimed this

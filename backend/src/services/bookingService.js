@@ -142,7 +142,7 @@ export const cancelBooking = async (userId, bookingId) => {
   const claimed = await Booking.findOneAndUpdate(
     { _id: booking._id, status: "confirmed" },
     { status: "cancelled", cancelledAt: new Date() },
-    { new: true }
+    { returnDocument: "after" }
   );
   if (!claimed) {
     throw new AppError("This booking was already cancelled", 409, "ALREADY_CANCELLED");

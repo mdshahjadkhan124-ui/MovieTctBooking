@@ -7,7 +7,7 @@ export const createMovie = (data) => Movie.create(data);
 
 export const updateMovie = async (id, updates) => {
   const movie = await Movie.findByIdAndUpdate(id, updates, {
-    new: true,
+    returnDocument: "after",
     runValidators: true,
   });
   if (!movie) throw new AppError("Movie not found", 404, "NOT_FOUND");
