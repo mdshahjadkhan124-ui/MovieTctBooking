@@ -7,7 +7,10 @@ export const moviesApi = apiSlice.injectEndpoints({
         const params = Object.fromEntries(
           Object.entries(filters).filter(([, value]) => Boolean(value))
         );
-        return { url: "/movies", params };
+        // The API pages at 20 by default. The browse grid is meant to show
+        // the whole catalog at once, which fits well inside one max-size
+        // page today — revisit with a "Load more" here if it stops fitting.
+        return { url: "/movies", params: { ...params, limit: 100 } };
       },
       transformResponse: (response) => response.data.movies,
       providesTags: ["Movie"],

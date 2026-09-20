@@ -36,7 +36,9 @@ export const showtimesApi = apiSlice.injectEndpoints({
       // param, instead of relying on it also treating "" as falsy.
       query: ({ movieId, city }) => ({
         url: "/showtimes",
-        params: { movie: movieId, ...(city && { city }) },
+        // One movie's showtimes across its theaters/dates — well inside a
+        // single max-size page, and the detail page groups them all at once.
+        params: { movie: movieId, ...(city && { city }), limit: 100 },
       }),
       transformResponse: (response) => response.data.showtimes,
       providesTags: (result, error, { movieId }) => [{ type: "Showtime", id: `movie-${movieId}` }],

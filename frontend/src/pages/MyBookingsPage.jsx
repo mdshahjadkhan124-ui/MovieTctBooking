@@ -28,7 +28,12 @@ const isCancellable = (booking) =>
   new Date(booking.showtime.startTime) > new Date();
 
 const MyBookingsPage = () => {
-  const { data: bookings, isLoading, isError } = useGetMyBookingsQuery();
+  // Bookings arrive a page at a time; "Load more" asks for the next one and
+  // RTK Query appends it to the same cached list (see bookingsApi).
+  const [page, setPage] = useState(1);
+  const { data, isLoading, isError, isFetching } = useGetMyBookingsQuery({ page });
+  const bookings = data?.bookings;
+  const pagination = data?.pagination;
   const [cancelBooking, { isLoading: isCancelling }] = useCancelBookingMutation();
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelError, setCancelError] = useState("");
@@ -66,12 +71,9 @@ const MyBookingsPage = () => {
         <p className="text-sm text-gray-500">You haven't booked any tickets yet.</p>
       )}
 
-      {bookings.map((booking) => (
-        <div
-          key={booking._id}
-          className="flex flex-col gap-2 rounded-md border border-gray-200 p-4 transition-colors hover:border-primary sm:flex-row sm:items-center sm:justify-between"
-        >
-          <Link to={`/bookings/${booking._id}/ticket`} className="flex-1">
+      {bookings.map((booking) => {
+        const details = (
+          <>
             <p className="font-medium text-gray-900">{booking.showtime?.movie?.title}</p>
             <p className="text-sm text-gray-500">
               {booking.theater?.name} &middot;{" "}
@@ -83,24 +85,55 @@ const MyBookingsPage = () => {
             {booking.status === "cancelled" && (
               <p className="text-sm text-gray-500">
                 Refund: &#8377;{booking.refundAmount ?? 0}
+                {/* Owed but not yet confirmed by Stripe — don't imply the
+                    money is already back. */}
+                {booking.refundStatus === "pending" && " (processing)"}
               </p>
             )}
-          </Link>
+          </>
+        );
+        // Only confirmed bookings have a ticket to open.
+        const hasTicket = booking.status === "confirmed";
 
-          <div className="flex flex-row items-center gap-3 sm:flex-col sm:items-end">
-            <StatusBadge status={booking.status} />
-            {isCancellable(booking) && (
-              <button
-                type="button"
-                onClick={() => setCancelTarget(booking)}
-                className="text-xs font-medium text-red-600 underline-offset-2 hover:underline"
-              >
-                Cancel Booking
-              </button>
+        return (
+          <div
+            key={booking._id}
+            className={`flex flex-col gap-2 rounded-md border border-gray-200 p-4 transition-colors sm:flex-row sm:items-center sm:justify-between ${hasTicket ? "hover:border-primary" : ""}`}
+          >
+            {hasTicket ? (
+              <Link to={`/bookings/${booking._id}/ticket`} className="flex-1">
+                {details}
+              </Link>
+            ) : (
+              <div className="flex-1">{details}</div>
             )}
+
+            <div className="flex flex-row items-center gap-3 sm:flex-col sm:items-end">
+              <StatusBadge status={booking.status} />
+              {isCancellable(booking) && (
+                <button
+                  type="button"
+                  onClick={() => setCancelTarget(booking)}
+                  className="text-xs font-medium text-red-600 underline-offset-2 hover:underline"
+                >
+                  Cancel Booking
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
+
+      {pagination?.hasMore && (
+        <button
+          type="button"
+          onClick={() => setPage((current) => current + 1)}
+          disabled={isFetching}
+          className="mx-auto rounded-md border border-gray-300 px-5 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {isFetching ? "Loading..." : `Load more (${bookings.length} of ${pagination.total})`}
+        </button>
+      )}
 
       {cancelTarget && (
         <CancelBookingModal

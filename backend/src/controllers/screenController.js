@@ -1,10 +1,16 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import * as screenService from "../services/screenService.js";
+import { parsePagination, paginationMeta } from "../utils/pagination.js";
 
 export const list = asyncHandler(async (req, res) => {
   const { theater } = req.query;
-  const screens = await screenService.listScreens(req.user, { theater });
-  res.json({ success: true, data: { screens }, message: "" });
+  const { page, limit, skip } = parsePagination(req.query);
+  const { screens, total } = await screenService.listScreens(req.user, { theater }, { skip, limit });
+  res.json({
+    success: true,
+    data: { screens, pagination: paginationMeta({ page, limit, total }) },
+    message: "",
+  });
 });
 
 export const getOne = asyncHandler(async (req, res) => {

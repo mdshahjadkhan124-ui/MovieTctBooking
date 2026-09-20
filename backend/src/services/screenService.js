@@ -55,10 +55,14 @@ export const getScreenById = async (user, id) => {
   return screen;
 };
 
-export const listScreens = async (user, filters = {}) => {
+export const listScreens = async (user, filters = {}, { skip = 0, limit } = {}) => {
   const query = {};
   if (filters.theater) query.theater = filters.theater;
   if (user.role === "theater_admin") query.theater = user.theater;
 
-  return Screen.find(query);
+  const [screens, total] = await Promise.all([
+    Screen.find(query).skip(skip).limit(limit),
+    Screen.countDocuments(query),
+  ]);
+  return { screens, total };
 };

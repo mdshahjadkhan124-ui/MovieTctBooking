@@ -140,13 +140,17 @@ export const getShowtimeByIdAdmin = async (user, id) => {
   return showtime;
 };
 
-export const listShowtimesAdmin = async (user, filters = {}) => {
+export const listShowtimesAdmin = async (user, filters = {}, { skip = 0, limit } = {}) => {
   const query = {};
   if (filters.theater) query.theater = filters.theater;
   if (filters.movie) query.movie = filters.movie;
   if (user.role === "theater_admin") query.theater = user.theater;
 
-  return Showtime.find(query).sort({ startTime: 1 });
+  const [showtimes, total] = await Promise.all([
+    Showtime.find(query).sort({ startTime: 1 }).skip(skip).limit(limit),
+    Showtime.countDocuments(query),
+  ]);
+  return { showtimes, total };
 };
 
 export const getPublicShowtimeById = async (id) => {
@@ -261,7 +265,7 @@ export const getSeatPricing = async (showtimeId) => {
   return { basePrice: showtime.price, occupancy, seatPrices };
 };
 
-export const listPublicShowtimes = async (filters = {}) => {
+export const listPublicShowtimes = async (filters = {}, { skip = 0, limit } = {}) => {
   const query = { isActive: true };
 
   if (filters.movie) query.movie = filters.movie;
@@ -284,9 +288,15 @@ export const listPublicShowtimes = async (filters = {}) => {
     query.startTime = { $gte: start, $lt: end };
   }
 
-  return Showtime.find(query)
-    .populate("movie")
-    .populate("theater")
-    .populate("screen")
-    .sort({ startTime: 1 });
+  const [showtimes, total] = await Promise.all([
+    Showtime.find(query)
+      .populate("movie")
+      .populate("theater")
+      .populate("screen")
+      .sort({ startTime: 1 })
+      .skip(skip)
+      .limit(limit),
+    Showtime.countDocuments(query),
+  ]);
+  return { showtimes, total };
 };

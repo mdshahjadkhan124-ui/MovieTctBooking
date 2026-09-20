@@ -1,5 +1,6 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import * as bookingService from "../services/bookingService.js";
+import { parsePagination, paginationMeta } from "../utils/pagination.js";
 
 export const checkout = asyncHandler(async (req, res) => {
   const { showtimeId, seatIds } = req.body;
@@ -12,8 +13,16 @@ export const checkout = asyncHandler(async (req, res) => {
 });
 
 export const listMine = asyncHandler(async (req, res) => {
-  const bookings = await bookingService.listUserBookings(req.user._id.toString());
-  res.json({ success: true, data: { bookings }, message: "" });
+  const { page, limit, skip } = parsePagination(req.query);
+  const { bookings, total } = await bookingService.listUserBookings(req.user._id.toString(), {
+    skip,
+    limit,
+  });
+  res.json({
+    success: true,
+    data: { bookings, pagination: paginationMeta({ page, limit, total }) },
+    message: "",
+  });
 });
 
 export const getById = asyncHandler(async (req, res) => {

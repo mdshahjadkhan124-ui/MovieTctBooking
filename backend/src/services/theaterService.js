@@ -42,9 +42,17 @@ export const getTheaterById = async (id, { includeInactive = false } = {}) => {
   return theater;
 };
 
-export const listTheaters = (filters = {}, { includeInactive = false } = {}) => {
+export const listTheaters = async (
+  filters = {},
+  { includeInactive = false, skip = 0, limit } = {}
+) => {
   const query = {};
   if (!includeInactive) query.isActive = true;
   if (filters.city) query["location.city"] = filters.city;
-  return Theater.find(query).sort({ name: 1 });
+
+  const [theaters, total] = await Promise.all([
+    Theater.find(query).sort({ name: 1 }).skip(skip).limit(limit),
+    Theater.countDocuments(query),
+  ]);
+  return { theaters, total };
 };

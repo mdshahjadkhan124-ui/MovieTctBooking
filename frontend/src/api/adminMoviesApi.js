@@ -3,7 +3,9 @@ import { apiSlice } from "./apiSlice.js";
 export const adminMoviesApi = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     getAdminMovies: builder.query({
-      query: () => "/admin/movies",
+      // Small list today; one max-size page keeps this table unchanged
+      // while the API itself is paginated.
+      query: () => ({ url: "/admin/movies", params: { limit: 100 } }),
       transformResponse: (response) => response.data.movies,
       providesTags: ["Movie"],
     }),

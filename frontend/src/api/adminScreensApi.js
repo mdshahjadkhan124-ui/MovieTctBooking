@@ -5,7 +5,7 @@ export const adminScreensApi = apiSlice.injectEndpoints({
     getAdminScreens: builder.query({
       query: (theaterId) => ({
         url: "/admin/screens",
-        params: theaterId ? { theater: theaterId } : {},
+        params: { ...(theaterId ? { theater: theaterId } : {}), limit: 100 },
       }),
       transformResponse: (response) => response.data.screens,
       providesTags: ["Screen"],

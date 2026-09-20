@@ -81,8 +81,9 @@ describe("listTheaterAdmins", () => {
       password: "password123",
     });
 
-    const admins = await authService.listTheaterAdmins();
+    const { admins, total } = await authService.listTheaterAdmins({ limit: 100 });
 
+    expect(total).toBeGreaterThanOrEqual(admins.length);
     expect(admins.every((admin) => admin.role === "theater_admin")).toBe(true);
     const created = admins.find((admin) => admin.email === "list-test.authtest@example.com");
     expect(created).toBeDefined();
@@ -100,7 +101,7 @@ describe("listTheaterAdmins", () => {
       role: "theater_admin",
     });
 
-    const admins = await authService.listTheaterAdmins();
+    const { admins } = await authService.listTheaterAdmins({ limit: 100 });
     const unassigned = admins.find((admin) => admin.email === "unassigned.authtest@example.com");
 
     expect(unassigned.theater).toBeNull();

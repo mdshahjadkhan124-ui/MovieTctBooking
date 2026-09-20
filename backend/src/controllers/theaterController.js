@@ -1,19 +1,30 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import * as theaterService from "../services/theaterService.js";
+import { parsePagination, paginationMeta } from "../utils/pagination.js";
 
 export const listPublic = asyncHandler(async (req, res) => {
   const { city } = req.query;
-  const theaters = await theaterService.listTheaters({ city });
-  res.json({ success: true, data: { theaters }, message: "" });
+  const { page, limit, skip } = parsePagination(req.query);
+  const { theaters, total } = await theaterService.listTheaters({ city }, { skip, limit });
+  res.json({
+    success: true,
+    data: { theaters, pagination: paginationMeta({ page, limit, total }) },
+    message: "",
+  });
 });
 
 export const listAdmin = asyncHandler(async (req, res) => {
   const { city } = req.query;
-  const theaters = await theaterService.listTheaters(
+  const { page, limit, skip } = parsePagination(req.query);
+  const { theaters, total } = await theaterService.listTheaters(
     { city },
-    { includeInactive: true }
+    { includeInactive: true, skip, limit }
   );
-  res.json({ success: true, data: { theaters }, message: "" });
+  res.json({
+    success: true,
+    data: { theaters, pagination: paginationMeta({ page, limit, total }) },
+    message: "",
+  });
 });
 
 export const getAdmin = asyncHandler(async (req, res) => {

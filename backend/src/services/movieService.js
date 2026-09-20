@@ -40,7 +40,11 @@ export const getMovieById = async (id, { includeInactive = false } = {}) => {
   return movie;
 };
 
-export const listMovies = async (filters = {}, { includeInactive = false } = {}) => {
+/**
+ * @returns {{ movies: Array, total: number }} `total` is the full match
+ * count, not the page size — the client needs it to know there's more.
+ */
+export const listMovies = async (filters = {}, { includeInactive = false, skip = 0, limit } = {}) => {
   const query = {};
   if (!includeInactive) query.isActive = true;
   if (filters.language) query.language = filters.language;
@@ -66,5 +70,9 @@ export const listMovies = async (filters = {}, { includeInactive = false } = {})
     query._id = { $in: movieIds };
   }
 
-  return Movie.find(query).sort({ releaseDate: -1 });
+  const [movies, total] = await Promise.all([
+    Movie.find(query).sort({ releaseDate: -1 }).skip(skip).limit(limit),
+    Movie.countDocuments(query),
+  ]);
+  return { movies, total };
 };

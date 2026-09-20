@@ -1,6 +1,7 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import * as showtimeService from "../services/showtimeService.js";
 import * as waitlistService from "../services/waitlistService.js";
+import { parsePagination, paginationMeta } from "../utils/pagination.js";
 
 // showtimeService can't import waitlistService directly (waitlistService
 // already depends on showtimeService for seat availability — importing it
@@ -17,12 +18,16 @@ const processWaitlistSafely = async (showtimeId) => {
 
 export const listPublic = asyncHandler(async (req, res) => {
   const { movie, city, date } = req.query;
-  const showtimes = await showtimeService.listPublicShowtimes({
-    movie,
-    city,
-    date,
+  const { page, limit, skip } = parsePagination(req.query);
+  const { showtimes, total } = await showtimeService.listPublicShowtimes(
+    { movie, city, date },
+    { skip, limit }
+  );
+  res.json({
+    success: true,
+    data: { showtimes, pagination: paginationMeta({ page, limit, total }) },
+    message: "",
   });
-  res.json({ success: true, data: { showtimes }, message: "" });
 });
 
 export const getPublic = asyncHandler(async (req, res) => {
@@ -94,11 +99,17 @@ export const lockStatus = asyncHandler(async (req, res) => {
 
 export const listAdmin = asyncHandler(async (req, res) => {
   const { theater, movie } = req.query;
-  const showtimes = await showtimeService.listShowtimesAdmin(req.user, {
-    theater,
-    movie,
+  const { page, limit, skip } = parsePagination(req.query);
+  const { showtimes, total } = await showtimeService.listShowtimesAdmin(
+    req.user,
+    { theater, movie },
+    { skip, limit }
+  );
+  res.json({
+    success: true,
+    data: { showtimes, pagination: paginationMeta({ page, limit, total }) },
+    message: "",
   });
-  res.json({ success: true, data: { showtimes }, message: "" });
 });
 
 export const getAdmin = asyncHandler(async (req, res) => {

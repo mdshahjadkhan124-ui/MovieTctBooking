@@ -20,11 +20,22 @@ const AdminShowtimesPage = () => {
   const { data: theaters } = useGetTheatersQuery();
   const { data: screens } = useGetAdminScreensQuery();
 
+  // Paged: this table covers every showtime ever scheduled. Changing a
+  // filter starts the list again from page 1.
+  const [page, setPage] = useState(1);
   const {
-    data: showtimes,
+    data,
     isLoading,
     isError,
-  } = useGetAdminShowtimesQuery({ movie: movieFilter, theater: theaterFilter });
+    isFetching,
+  } = useGetAdminShowtimesQuery({ movie: movieFilter, theater: theaterFilter, page });
+  const showtimes = data?.showtimes;
+  const pagination = data?.pagination;
+
+  const applyFilter = (setFilter) => (value) => {
+    setFilter(value);
+    setPage(1);
+  };
   const [updateShowtime] = useUpdateShowtimeMutation();
   const [togglingId, setTogglingId] = useState(null);
   const [actionError, setActionError] = useState("");
@@ -60,7 +71,7 @@ const AdminShowtimesPage = () => {
       <div className="flex flex-wrap gap-3">
         <select
           value={movieFilter}
-          onChange={(e) => setMovieFilter(e.target.value)}
+          onChange={(e) => applyFilter(setMovieFilter)(e.target.value)}
           className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-primary"
         >
           <option value="">All movies</option>
@@ -73,7 +84,7 @@ const AdminShowtimesPage = () => {
 
         <select
           value={theaterFilter}
-          onChange={(e) => setTheaterFilter(e.target.value)}
+          onChange={(e) => applyFilter(setTheaterFilter)(e.target.value)}
           className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-primary"
         >
           <option value="">All theaters</option>
@@ -155,6 +166,17 @@ const AdminShowtimesPage = () => {
             <p className="px-4 py-6 text-center text-gray-500">No showtimes yet.</p>
           )}
         </div>
+      )}
+
+      {pagination?.hasMore && (
+        <button
+          type="button"
+          onClick={() => setPage((current) => current + 1)}
+          disabled={isFetching}
+          className="mx-auto rounded-md border border-gray-300 px-5 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {isFetching ? "Loading..." : `Load more (${showtimes.length} of ${pagination.total})`}
+        </button>
       )}
     </div>
   );

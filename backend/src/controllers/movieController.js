@@ -1,10 +1,19 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import * as movieService from "../services/movieService.js";
+import { parsePagination, paginationMeta } from "../utils/pagination.js";
 
 export const listPublic = asyncHandler(async (req, res) => {
   const { city, language, genre, search } = req.query;
-  const movies = await movieService.listMovies({ city, language, genre, search });
-  res.json({ success: true, data: { movies }, message: "" });
+  const { page, limit, skip } = parsePagination(req.query);
+  const { movies, total } = await movieService.listMovies(
+    { city, language, genre, search },
+    { skip, limit }
+  );
+  res.json({
+    success: true,
+    data: { movies, pagination: paginationMeta({ page, limit, total }) },
+    message: "",
+  });
 });
 
 export const getPublic = asyncHandler(async (req, res) => {
@@ -14,11 +23,16 @@ export const getPublic = asyncHandler(async (req, res) => {
 
 export const listAdmin = asyncHandler(async (req, res) => {
   const { city, language, genre } = req.query;
-  const movies = await movieService.listMovies(
+  const { page, limit, skip } = parsePagination(req.query);
+  const { movies, total } = await movieService.listMovies(
     { city, language, genre },
-    { includeInactive: true }
+    { includeInactive: true, skip, limit }
   );
-  res.json({ success: true, data: { movies }, message: "" });
+  res.json({
+    success: true,
+    data: { movies, pagination: paginationMeta({ page, limit, total }) },
+    message: "",
+  });
 });
 
 export const getAdmin = asyncHandler(async (req, res) => {

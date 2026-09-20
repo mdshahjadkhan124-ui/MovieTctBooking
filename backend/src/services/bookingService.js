@@ -114,8 +114,14 @@ const BOOKING_POPULATE = [
   { path: "theater" },
 ];
 
-export const listUserBookings = (userId) =>
-  Booking.find({ user: userId }).sort({ createdAt: -1 }).populate(BOOKING_POPULATE);
+export const listUserBookings = async (userId, { skip = 0, limit } = {}) => {
+  const query = { user: userId };
+  const [bookings, total] = await Promise.all([
+    Booking.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).populate(BOOKING_POPULATE),
+    Booking.countDocuments(query),
+  ]);
+  return { bookings, total };
+};
 
 export const getBookingById = async (userId, bookingId) => {
   const booking = await Booking.findById(bookingId).populate(BOOKING_POPULATE);

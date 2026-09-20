@@ -1,5 +1,6 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import * as authService from "../services/authService.js";
+import { parsePagination, paginationMeta } from "../utils/pagination.js";
 
 export const createUser = asyncHandler(async (req, res) => {
   const { name, email, password, role, theater } = req.body;
@@ -14,6 +15,11 @@ export const createUser = asyncHandler(async (req, res) => {
 });
 
 export const listUsers = asyncHandler(async (req, res) => {
-  const users = await authService.listTheaterAdmins();
-  res.json({ success: true, data: { users }, message: "" });
+  const { page, limit, skip } = parsePagination(req.query);
+  const { admins, total } = await authService.listTheaterAdmins({ skip, limit });
+  res.json({
+    success: true,
+    data: { users: admins, pagination: paginationMeta({ page, limit, total }) },
+    message: "",
+  });
 });
