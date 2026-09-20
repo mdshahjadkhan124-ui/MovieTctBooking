@@ -1,5 +1,8 @@
 import { createSlice } from "@reduxjs/toolkit";
 
+// UX cap only — the server enforces the same limit (MAX_SEATS_PER_BOOKING in
+// backend/src/validators/showtimeValidators.js) on lock, checkout and
+// recommendation requests.
 const DEFAULT_MAX_SEATS = 10;
 
 const initialState = {

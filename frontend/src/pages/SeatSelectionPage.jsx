@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { Elements } from "@stripe/react-stripe-js";
 import {
   useGetShowtimeByIdQuery,
   useLockSeatsMutation,
+  useReleaseSeatLocksMutation,
   useGetLockedSeatsQuery,
   useGetSeatPricingQuery,
 } from "../api/showtimesApi.js";
@@ -30,8 +31,10 @@ const LOCK_REFRESH_INTERVAL_MS = 12000;
 const SeatSelectionPage = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { data: showtime, isLoading, isError } = useGetShowtimeByIdQuery(id);
-  const { data: user } = useGetMeQuery();
+  const { data: user, isLoading: isUserLoading } = useGetMeQuery();
 
   // Socket.IO is the primary source of truth for lock state; polling is the
   // fallback for when it's unavailable (Render's free tier idles WebSocket
@@ -86,8 +89,20 @@ const SeatSelectionPage = () => {
   }, [myWaitlistStatus, id]);
 
   const [lockSeats] = useLockSeatsMutation();
+  const [releaseSeatLocks] = useReleaseSeatLocksMutation();
   const [checkout] = useCheckoutMutation();
   const [fetchBooking] = useLazyGetBookingByIdQuery();
+
+  // Token for the seats this page locked itself (a waitlist offer's hold is
+  // server-created and not tracked here). Refs rather than state because the
+  // unmount cleanup below needs the latest values, not the ones captured
+  // when the effect was created.
+  const heldLockTokenRef = useRef(null);
+  // True from the moment a card is submitted until that attempt fails. While
+  // true the lock must survive navigation: the Stripe webhook re-verifies it
+  // to confirm the booking, so releasing it would turn a successful payment
+  // into a refund.
+  const paymentSubmittedRef = useRef(false);
 
   // idle -> locking -> awaiting_payment -> confirming -> success | error
   const [checkoutState, setCheckoutState] = useState("idle");
@@ -110,6 +125,22 @@ const SeatSelectionPage = () => {
   }, [id, dispatch]);
 
   useEffect(() => () => clearTimeout(pollTimeoutRef.current), []);
+
+  // Abandoning checkout (navigating away, or switching showtime) frees the
+  // held seats now instead of leaving them blocked until the 7-minute TTL.
+  // A closed tab or full page reload doesn't unmount React, so those still
+  // fall back to the TTL.
+  useEffect(
+    () => () => {
+      const token = heldLockTokenRef.current;
+      if (token && !paymentSubmittedRef.current) {
+        releaseSeatLocks({ showtimeId: id, token });
+      }
+      heldLockTokenRef.current = null;
+      paymentSubmittedRef.current = false;
+    },
+    [id, releaseSeatLocks]
+  );
 
   // Joins this showtime's room and listens for real-time lock changes and
   // (for a logged-in socket — see config/socket.js's cookie-authenticated
@@ -213,13 +244,25 @@ const SeatSelectionPage = () => {
   // "unavailable" conflict. skipLock lets the offer path go straight to
   // checkout, which re-derives ownership from the existing Redis lock
   // exactly like any other checkout does.
+  const redirectToLogin = () => navigate("/login", { state: { from: location } });
+
   const runCheckout = async (seatIdsToBook, { skipLock }) => {
     setCheckoutError("");
     setPriceNotice("");
     setCheckoutState("locking");
     try {
       if (!skipLock) {
-        await lockSeats({ showtimeId: id, seatIds: seatIdsToBook }).unwrap();
+        // Re-locking seats this user already holds (e.g. "Try again" after a
+        // declined card) succeeds server-side and moves them to the new token.
+        const { token } = await lockSeats({ showtimeId: id, seatIds: seatIdsToBook }).unwrap();
+        const previousToken = heldLockTokenRef.current;
+        heldLockTokenRef.current = token;
+        // Anything from an earlier attempt that isn't in this selection is
+        // still held under the old token — releasing it frees exactly those
+        // leftovers, since re-locked seats already carry the new token.
+        if (previousToken && previousToken !== token) {
+          releaseSeatLocks({ showtimeId: id, token: previousToken });
+        }
       }
       const result = await checkout({ showtimeId: id, seatIds: seatIdsToBook }).unwrap();
 
@@ -243,6 +286,12 @@ const SeatSelectionPage = () => {
       setChargeAmount(result.amount);
       setCheckoutState("awaiting_payment");
     } catch (err) {
+      // Session expired (or never existed) between page load and checkout.
+      if (err?.status === 401) {
+        setCheckoutState("idle");
+        redirectToLogin();
+        return;
+      }
       const message =
         err?.data?.error?.message ||
         (err?.status === 409
@@ -253,7 +302,17 @@ const SeatSelectionPage = () => {
     }
   };
 
-  const handleProceed = () => runCheckout(selectedSeatIds, { skipLock: false });
+  const handleProceed = () => {
+    if (isUserLoading) return;
+    // Seat locks and checkout require an account — send anonymous visitors
+    // to sign in (and back here afterwards) instead of surfacing the API's
+    // raw "Not authenticated" error.
+    if (!user) {
+      redirectToLogin();
+      return;
+    }
+    runCheckout(selectedSeatIds, { skipLock: false });
+  };
 
   const handleBookOffer = () => {
     const offerSeatIds = waitlistOffer.seatIds;
@@ -272,7 +331,14 @@ const SeatSelectionPage = () => {
     pollBookingStatus(bookingId, POLL_MAX_ATTEMPTS);
   };
 
+  const handlePaymentStart = () => {
+    paymentSubmittedRef.current = true;
+  };
+
   const handlePaymentError = (message) => {
+    // The card attempt definitively failed (nothing charged), so the held
+    // seats are safe to release again if the user now walks away.
+    paymentSubmittedRef.current = false;
     setCheckoutError(message);
     setCheckoutState("error");
   };
@@ -353,6 +419,7 @@ const SeatSelectionPage = () => {
           <Elements stripe={stripePromise}>
             <CheckoutForm
               clientSecret={clientSecret}
+              onPaymentStart={handlePaymentStart}
               onCharged={handleCharged}
               onError={handlePaymentError}
             />

@@ -23,8 +23,9 @@ const getConfirmedBookedSeatIds = async (showtimeId) => {
  * locks (temporary holds) union'd with confirmed bookings (permanent).
  * A lock is released once a booking confirms (see bookingService), so
  * Redis alone can't answer "is this seat gone forever" — this is the one
- * place that combines both, used for the /locks response, the emitted
- * seatsUpdated payload, and lockSeats' own pre-lock validation.
+ * place that combines both, used for the /locks response and the emitted
+ * seatsUpdated payload. (lockSeats uses a caller-aware variant, since the
+ * caller's OWN locks don't make a seat unavailable to them.)
  */
 export const getUnavailableSeatIds = async (showtimeId) => {
   const [lockedSeatIds, bookedSeatIds] = await Promise.all([
@@ -162,13 +163,19 @@ export const lockSeats = async (showtimeId, seatIds, userId) => {
   }
 
   // Reject bogus/typo'd seat ids, ones the layout itself marks unavailable,
-  // ones already locked by someone else, or ones already confirmed-booked —
-  // Redis locking is only meaningful for genuinely free, real seats. (Redis's
-  // own atomic SET NX already prevents two locks on the same seat; this
-  // upfront check additionally catches the confirmed-booking case, which
-  // Redis has no record of once that booking's lock was released.)
-  const unavailableSeatIds = await getUnavailableSeatIds(showtimeId);
-  const grid = buildSeatGrid(showtime.screen.layout, new Set(unavailableSeatIds));
+  // ones locked by someone ELSE, or ones already confirmed-booked — Redis
+  // locking is only meaningful for genuinely free, real seats. Seats the
+  // caller already holds stay allowed, so retrying checkout (e.g. after a
+  // declined card) re-acquires them instead of failing against the caller's
+  // own lock. (acquireLocks' atomic script is what actually prevents two
+  // users locking one seat; this upfront check additionally catches the
+  // confirmed-booking case, which Redis has no record of once that
+  // booking's lock was released.)
+  const [bookedSeatIds, lockedByOthers] = await Promise.all([
+    getConfirmedBookedSeatIds(showtimeId),
+    seatLockService.getSeatIdsLockedByOthers(showtimeId, userId),
+  ]);
+  const grid = buildSeatGrid(showtime.screen.layout, new Set([...bookedSeatIds, ...lockedByOthers]));
   const validSeatIds = new Set(
     grid.flat().filter((seat) => seat.status === "available").map((seat) => seat.id)
   );

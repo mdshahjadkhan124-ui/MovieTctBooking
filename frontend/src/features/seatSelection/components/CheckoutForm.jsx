@@ -14,8 +14,10 @@ const CARD_ELEMENT_OPTIONS = {
 // Confirms the PaymentIntent client-side with Stripe.js. The actual booking
 // commit happens asynchronously via the /api/webhooks/stripe handler, so a
 // "succeeded" result here only means the card was charged — onCharged
-// triggers the caller's polling of the booking's own status.
-const CheckoutForm = ({ clientSecret, onCharged, onError }) => {
+// triggers the caller's polling of the booking's own status. onPaymentStart
+// fires just before the card is submitted, so the caller knows a charge may
+// be in flight and must not release the seat lock the webhook will verify.
+const CheckoutForm = ({ clientSecret, onPaymentStart, onCharged, onError }) => {
   const stripe = useStripe();
   const elements = useElements();
   const [submitting, setSubmitting] = useState(false);
@@ -25,6 +27,7 @@ const CheckoutForm = ({ clientSecret, onCharged, onError }) => {
     if (!stripe || !elements || submitting) return;
 
     setSubmitting(true);
+    onPaymentStart?.();
     const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
       payment_method: { card: elements.getElement(CardElement) },
     });

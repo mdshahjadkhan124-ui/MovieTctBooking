@@ -15,6 +15,16 @@ export const showtimesApi = apiSlice.injectEndpoints({
       }),
       transformResponse: (response) => response.data,
     }),
+    // Releases only the seats still held under `token` (ownership-guarded
+    // server-side), so it's safe to call with a stale token.
+    releaseSeatLocks: builder.mutation({
+      query: ({ showtimeId, token }) => ({
+        url: `/showtimes/${showtimeId}/lock`,
+        method: "DELETE",
+        body: { token },
+      }),
+      transformResponse: (response) => response.data.released,
+    }),
     getLockedSeats: builder.query({
       query: (showtimeId) => `/showtimes/${showtimeId}/locks`,
       transformResponse: (response) => response.data.lockedSeatIds,
@@ -41,6 +51,7 @@ export const showtimesApi = apiSlice.injectEndpoints({
 export const {
   useGetShowtimeByIdQuery,
   useLockSeatsMutation,
+  useReleaseSeatLocksMutation,
   useGetLockedSeatsQuery,
   useGetShowtimesByMovieQuery,
   useGetSeatPricingQuery,
