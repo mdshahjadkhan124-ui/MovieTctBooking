@@ -1,5 +1,15 @@
 import { AppError } from "../utils/AppError.js";
 
+// A unique-index violation (Mongo error 11000) says which field(s) collided
+// in keyValue, e.g. { email: "a@b.com" }. Only the field NAMES are used —
+// never the values — so the message can't echo user input back.
+const duplicateKeyMessage = (err) => {
+  const fields = Object.keys(err.keyValue ?? err.keyPattern ?? {});
+  if (fields.length === 1 && fields[0] === "email") return "Email already in use";
+  if (fields.length > 0) return `A record with this ${fields.join(" + ")} already exists`;
+  return "Duplicate value";
+};
+
 export const errorHandler = (err, req, res, next) => {
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({
@@ -11,7 +21,7 @@ export const errorHandler = (err, req, res, next) => {
   if (err.code === 11000) {
     return res.status(409).json({
       success: false,
-      error: { code: "DUPLICATE", message: "Email already in use" },
+      error: { code: "DUPLICATE", message: duplicateKeyMessage(err) },
     });
   }
 

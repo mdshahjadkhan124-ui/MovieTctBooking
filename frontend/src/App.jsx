@@ -1,5 +1,5 @@
 import { Suspense, lazy } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import HomePage from "./pages/HomePage.jsx";
@@ -18,6 +18,7 @@ const MyBookingsPage = lazy(() => import("./pages/MyBookingsPage.jsx"));
 const ETicketPage = lazy(() => import("./pages/ETicketPage.jsx"));
 const AdminRoute = lazy(() => import("./admin/AdminRoute.jsx"));
 const AdminLayout = lazy(() => import("./admin/AdminLayout.jsx"));
+const AdminIndexRedirect = lazy(() => import("./admin/AdminIndexRedirect.jsx"));
 const AdminMoviesPage = lazy(() => import("./admin/pages/AdminMoviesPage.jsx"));
 const AdminMovieFormPage = lazy(() => import("./admin/pages/AdminMovieFormPage.jsx"));
 const AdminTheatersPage = lazy(() => import("./admin/pages/AdminTheatersPage.jsx"));
@@ -62,7 +63,7 @@ const App = () => {
 
         <Route path="/admin" element={<AdminRoute />}>
           <Route element={<AdminLayout />}>
-            <Route index element={<Navigate to="/admin/movies" replace />} />
+            <Route index element={<AdminIndexRedirect />} />
             <Route path="movies" element={<AdminMoviesPage />} />
             <Route path="movies/new" element={<AdminMovieFormPage />} />
             <Route path="movies/:id/edit" element={<AdminMovieFormPage />} />

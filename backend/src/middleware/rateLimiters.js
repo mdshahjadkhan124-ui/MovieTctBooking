@@ -49,44 +49,42 @@ export const createRateLimiter = ({ windowMs, max, prefix }) =>
 // suite dependent on its total request volume staying under the production
 // limit forever — inherently flaky as the suite grows. Skipped only under
 // vitest (NODE_ENV=test is vitest's own default, never set this way for a
-// real deployment); the limiter's own logic is still fully exercised via a
-// dedicated, always-on instance in rateLimiters.test.js.
+// real deployment); the limiter's own logic is still fully exercised via
+// dedicated, always-on instances in hardening.test.js.
 const isTestEnv = () => process.env.NODE_ENV === "test";
 
-// RedisStore.init() (called synchronously inside rateLimit()) sends a
-// SCRIPT LOAD to Redis immediately — but app.js (and therefore this
-// module) is imported before server.js's connectRedis() resolves, so
-// building the limiter at module-load time would race ahead of the
-// connection and fail. Deferring construction to the first actual request
-// (memoized after that) sidesteps the race entirely: by the time any real
-// request arrives, httpServer.listen() has already run, which only happens
-// after connectRedis() resolved.
-const lazy = (factory) => {
-  let instance;
-  return (req, res, next) => {
-    if (!instance) instance = factory();
-    return instance(req, res, next);
-  };
+// RedisStore sends a SCRIPT LOAD to Redis the moment it's constructed, and
+// app.js (which mounts the middlewares below) is imported before
+// server.js's connectRedis() resolves — so the limiters can't be built at
+// module load. They also must not be built inside a request: express-rate-
+// limit flags that as ERR_ERL_CREATED_IN_REQUEST_HANDLER. Instead server.js
+// calls initRateLimiters() once at startup, after Redis connects and before
+// the server starts listening; the exported middlewares just delegate to
+// whatever it built.
+let globalLimiter = null;
+let authLimiter = null;
+
+export const initRateLimiters = () => {
+  globalLimiter = createRateLimiter({
+    windowMs: GLOBAL_RATE_LIMIT_WINDOW_MS,
+    max: GLOBAL_RATE_LIMIT_MAX,
+    prefix: "rl:global:",
+  });
+  authLimiter = createRateLimiter({
+    windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+    max: AUTH_RATE_LIMIT_MAX,
+    prefix: "rl:auth:",
+  });
 };
 
-const maybeSkip = (limiter) => (req, res, next) => (isTestEnv() ? next() : limiter(req, res, next));
+// Fails closed: a request reaching an uninitialized limiter is a startup
+// ordering bug, and silently skipping rate limiting would hide it.
+const delegateTo = (getLimiter, name) => (req, res, next) => {
+  if (isTestEnv()) return next();
+  const limiter = getLimiter();
+  if (!limiter) return next(new Error(`${name} used before initRateLimiters() was called`));
+  return limiter(req, res, next);
+};
 
-export const globalRateLimiter = maybeSkip(
-  lazy(() =>
-    createRateLimiter({
-      windowMs: GLOBAL_RATE_LIMIT_WINDOW_MS,
-      max: GLOBAL_RATE_LIMIT_MAX,
-      prefix: "rl:global:",
-    })
-  )
-);
-
-export const authRateLimiter = maybeSkip(
-  lazy(() =>
-    createRateLimiter({
-      windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
-      max: AUTH_RATE_LIMIT_MAX,
-      prefix: "rl:auth:",
-    })
-  )
-);
+export const globalRateLimiter = delegateTo(() => globalLimiter, "globalRateLimiter");
+export const authRateLimiter = delegateTo(() => authLimiter, "authRateLimiter");

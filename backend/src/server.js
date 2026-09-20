@@ -4,12 +4,16 @@ import app from "./app.js";
 import { connectDB } from "./config/db.js";
 import { connectRedis } from "./config/redis.js";
 import { initSocket } from "./config/socket.js";
+import { initRateLimiters } from "./middleware/rateLimiters.js";
 
 const PORT = process.env.PORT || 5000;
 
 const start = async () => {
   await connectDB();
   await connectRedis();
+  // Needs a connected Redis client, and must run before listen() so no
+  // request can reach a limiter that hasn't been built yet.
+  initRateLimiters();
 
   // Socket.IO needs the raw http.Server (not the Express app) so it can
   // upgrade connections to WebSocket on the same port as the REST API.
