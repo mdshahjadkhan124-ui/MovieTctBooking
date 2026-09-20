@@ -4,6 +4,7 @@ import { AppError } from "../utils/AppError.js";
 import { buildSeatGrid } from "../utils/buildSeatGrid.js";
 import * as seatLockService from "./seatLockService.js";
 import { getUnavailableSeatIds } from "./showtimeService.js";
+import { recommendSeats } from "./seatRecommendation.js";
 import { emitSeatsUpdated, emitWaitlistOffer } from "../config/socket.js";
 
 // How long a notified user's exclusive hold on the offered seats lasts —
@@ -15,12 +16,11 @@ export const WAITLIST_HOLD_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 const ACTIVE_STATUSES = ["waiting", "notified"];
 
-const availableSeatIds = async (showtime) => {
-  const allSeatIds = buildSeatGrid(showtime.screen.layout)
-    .flat()
-    .map((seat) => seat.id);
+// Live seat grid for a showtime: current locks and confirmed bookings marked
+// unavailable, so anything picked off it is genuinely free right now.
+const liveSeatGrid = async (showtime) => {
   const unavailable = new Set(await getUnavailableSeatIds(showtime._id.toString()));
-  return allSeatIds.filter((id) => !unavailable.has(id));
+  return buildSeatGrid(showtime.screen.layout, unavailable);
 };
 
 export const joinWaitlist = async (userId, showtimeId, seatsRequested) => {
@@ -178,19 +178,33 @@ export const processWaitlist = async (showtimeId, { holdTtlMs = WAITLIST_HOLD_TT
   const showtime = await Showtime.findById(showtimeId).populate("screen");
   if (!showtime || !showtime.isActive) return;
 
-  const freeSeatIds = await availableSeatIds(showtime);
-  if (freeSeatIds.length === 0) return;
+  const grid = await liveSeatGrid(showtime);
+  const freeSeatCount = grid.flat().filter((seat) => seat.status === "available").length;
+  if (freeSeatCount === 0) return;
 
-  // FIFO, but not strictly blocking: the earliest entry whose request FITS
-  // in what's currently free wins, so a party of 4 waiting behind a party
+  // FIFO, but not strictly blocking: the earliest entry the recommendation
+  // engine can actually seat wins, so a party of 4 waiting behind a party
   // of 2 doesn't stall the queue while only 2 seats are actually free.
+  //
+  // The offered seats come from recommendSeats — the same engine behind the
+  // seat page's "Suggest best seats" — rather than the first N free seats in
+  // grid order, which was often the front row and sometimes not even
+  // adjacent. A party that can't be seated together right now is skipped
+  // (not offered scattered seats); a later trigger retries them.
   const candidates = await WaitlistEntry.find({ showtime: showtimeId, status: "waiting" }).sort({
     createdAt: 1,
   });
-  const eligible = candidates.find((c) => c.seatsRequested <= freeSeatIds.length);
+  let eligible = null;
+  let offeredSeatIds = null;
+  for (const candidate of candidates) {
+    if (candidate.seatsRequested > freeSeatCount) continue;
+    const recommendation = recommendSeats(grid, candidate.seatsRequested);
+    if (!recommendation) continue;
+    eligible = candidate;
+    offeredSeatIds = recommendation.seats;
+    break;
+  }
   if (!eligible) return;
-
-  const offeredSeatIds = freeSeatIds.slice(0, eligible.seatsRequested);
 
   const lockResult = await seatLockService.acquireLocks(
     showtimeId,

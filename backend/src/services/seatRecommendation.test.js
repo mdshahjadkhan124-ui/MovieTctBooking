@@ -129,6 +129,18 @@ describe("recommendSeats", () => {
     expect(new Set(result.seats.map((id) => id[0])).size).toBe(1); // all one row
   });
 
+  it("returns null when n exceeds the total number of available seats, across any number of rows", () => {
+    // 4 rows x 5 columns = 20 seats, D5 unavailable -> 19 available. 20 can
+    // never be seated, no matter how the split search would arrange it.
+    const grid = [makeRow("A", 5), makeRow("B", 5), makeRow("C", 5), makeRow("D", 5, { 5: "unavailable" })];
+    expect(recommendSeats(grid, 20)).toBeNull();
+    // ...while exactly the available count is still a real split (5+5+5+4).
+    const all = recommendSeats(grid, 19);
+    expect(all.type).toBe("split");
+    expect(all.seats).toHaveLength(19);
+    expect(all.seats).not.toContain("D5");
+  });
+
   it("returns null for invalid input (n <= 0, non-integer n, or empty grid)", () => {
     expect(recommendSeats([makeRow("A", 5)], 0)).toBeNull();
     expect(recommendSeats([makeRow("A", 5)], -1)).toBeNull();

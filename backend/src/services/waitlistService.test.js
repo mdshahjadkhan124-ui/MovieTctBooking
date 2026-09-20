@@ -15,6 +15,7 @@ import { WaitlistEntry } from "../models/WaitlistEntry.js";
 import * as seatLockService from "./seatLockService.js";
 import * as bookingService from "./bookingService.js";
 import * as waitlistService from "./waitlistService.js";
+import { sweepOnce } from "./waitlistSweeper.js";
 
 let server;
 let baseUrl;
@@ -242,6 +243,44 @@ describe("waitlist: cancellation-driven notification + fulfillment", () => {
     const entry = await WaitlistEntry.findOne({ user: userA, showtime: showtime._id });
     expect(entry.status).toBe("fulfilled");
   }, 20000);
+});
+
+describe("waitlist: offered seats come from the recommendation engine", () => {
+  it("offers a contiguous block, not just the first free seats in grid order", async () => {
+    // 2 rows x 3 columns with A2 permanently unavailable. The first two free
+    // seats in grid order are A1 and A3 — which aren't adjacent — while row
+    // B can seat a real pair. The engine must pick the pair.
+    const splitRowScreen = await Screen.create({
+      theater: theater._id,
+      name: "Split-Row Screen",
+      layout: { rows: 2, columns: 3, unavailableSeats: ["A2"] },
+    });
+    const showtime = await makeShowtime(splitRowScreen);
+    const showtimeId = showtime._id.toString();
+
+    await waitlistService.joinWaitlist(userA, showtimeId, 2);
+    await waitlistService.processWaitlist(showtimeId);
+
+    const entry = await WaitlistEntry.findOne({ user: userA, showtime: showtime._id });
+    expect(entry.status).toBe("notified");
+    expect(entry.heldSeatIds).toEqual(["B1", "B2"]);
+  });
+});
+
+describe("waitlist: the background sweeper replaces GET /locks doing writes", () => {
+  it("advances the queue for showtimes with someone waiting", async () => {
+    const showtime = await makeShowtime(screenSingle);
+    const showtimeId = showtime._id.toString();
+    await waitlistService.joinWaitlist(userC, showtimeId, 1);
+
+    // No request is involved — this is what the timer calls.
+    const swept = await sweepOnce();
+    expect(swept.map(String)).toContain(showtimeId);
+
+    const entry = await WaitlistEntry.findOne({ user: userC, showtime: showtime._id });
+    expect(entry.status).toBe("notified");
+    expect(entry.heldSeatIds).toEqual(["A1"]);
+  });
 });
 
 describe("waitlist: hold expiry advances the offer to the next eligible user", () => {

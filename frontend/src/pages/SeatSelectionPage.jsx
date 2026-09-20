@@ -8,6 +8,7 @@ import {
   useReleaseSeatLocksMutation,
   useGetLockedSeatsQuery,
   useGetSeatPricingQuery,
+  useLazyGetSeatRecommendationQuery,
 } from "../api/showtimesApi.js";
 import { useCheckoutMutation, useLazyGetBookingByIdQuery } from "../api/bookingsApi.js";
 import { useGetMeQuery } from "../api/authApi.js";
@@ -19,6 +20,7 @@ import { toggleSeat, clearSelection, setSelection } from "../features/seatSelect
 import ScreenIndicator from "../features/seatSelection/components/ScreenIndicator.jsx";
 import SeatGrid from "../features/seatSelection/components/SeatGrid.jsx";
 import Legend from "../features/seatSelection/components/Legend.jsx";
+import SeatSuggestion from "../features/seatSelection/components/SeatSuggestion.jsx";
 import SelectionSummary from "../features/seatSelection/components/SelectionSummary.jsx";
 import CheckoutForm from "../features/seatSelection/components/CheckoutForm.jsx";
 import WaitlistPanel from "../features/seatSelection/components/WaitlistPanel.jsx";
@@ -73,6 +75,13 @@ const SeatSelectionPage = () => {
   );
   const [waitlistOffer, setWaitlistOffer] = useState(null);
 
+  // Seat recommendation engine, driven by the "Suggest best seats" control
+  // above the grid. Lazy: only requested when the user actually asks.
+  const [requestRecommendation, { isFetching: isSuggesting }] =
+    useLazyGetSeatRecommendationQuery();
+  const [suggestCount, setSuggestCount] = useState(2);
+  const [suggestMessage, setSuggestMessage] = useState("");
+
   // Keeps the offer banner correct across a page load/refresh (not just the
   // live socket push): if the server says this user is currently "notified"
   // for this showtime, show the same banner+countdown as if the socket
@@ -122,6 +131,7 @@ const SeatSelectionPage = () => {
     setChargeAmount(null);
     setPriceNotice("");
     setWaitlistOffer(null);
+    setSuggestMessage("");
   }, [id, dispatch]);
 
   useEffect(() => () => clearTimeout(pollTimeoutRef.current), []);
@@ -211,6 +221,36 @@ const SeatSelectionPage = () => {
       return acc;
     }, {})
   );
+
+  // Applies the engine's pick as the current selection, which is what makes
+  // those seats light up in the grid — and leaves them immediately bookable
+  // via Proceed. Always re-requested (never served from cache), since
+  // availability changes as other people book.
+  const handleSuggestSeats = async () => {
+    setSuggestMessage("");
+    try {
+      const recommendation = await requestRecommendation({
+        showtimeId: id,
+        count: suggestCount,
+      }).unwrap();
+
+      if (!recommendation) {
+        setSuggestMessage(
+          `Couldn't seat a group of ${suggestCount} here — try a smaller group or another showtime.`
+        );
+        return;
+      }
+
+      dispatch(setSelection(recommendation.seats));
+      setSuggestMessage(
+        recommendation.type === "split"
+          ? `Best available: ${recommendation.seats.join(", ")} — split across rows, since no single row has ${suggestCount} together.`
+          : `Best available: ${recommendation.seats.join(", ")}.`
+      );
+    } catch {
+      setSuggestMessage("Could not get a suggestion. Please try again.");
+    }
+  };
 
   const handleToggleSeat = (seat) => {
     if (checkoutState !== "idle") return; // seats are locked in once checkout has started
@@ -361,6 +401,18 @@ const SeatSelectionPage = () => {
           {new Date(showtime.startTime).toLocaleString()}
         </p>
       </div>
+
+      {/* Above the grid, not below it: this is the "pick seats for me"
+          shortcut, so it has to be visible before the user starts hunting
+          through the map themselves. */}
+      <SeatSuggestion
+        count={suggestCount}
+        onCountChange={setSuggestCount}
+        onSuggest={handleSuggestSeats}
+        busy={isSuggesting}
+        disabled={checkoutState !== "idle"}
+        message={suggestMessage}
+      />
 
       <ScreenIndicator />
       <SeatGrid grid={grid} selectedSeatIds={selectedSeatIds} onToggleSeat={handleToggleSeat} />

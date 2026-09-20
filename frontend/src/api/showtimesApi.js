@@ -45,6 +45,16 @@ export const showtimesApi = apiSlice.injectEndpoints({
       query: (showtimeId) => `/showtimes/${showtimeId}/pricing`,
       transformResponse: (response) => response.data,
     }),
+    // On-demand (lazy) — the seat page asks for this only when the user
+    // presses "Suggest best seats", never on load. `recommendation` is null
+    // when the requested group can't be seated.
+    getSeatRecommendation: builder.query({
+      query: ({ showtimeId, count }) => ({
+        url: `/showtimes/${showtimeId}/recommend`,
+        params: { count },
+      }),
+      transformResponse: (response) => response.data.recommendation,
+    }),
   }),
 });
 
@@ -55,4 +65,5 @@ export const {
   useGetLockedSeatsQuery,
   useGetShowtimesByMovieQuery,
   useGetSeatPricingQuery,
+  useLazyGetSeatRecommendationQuery,
 } = showtimesApi;

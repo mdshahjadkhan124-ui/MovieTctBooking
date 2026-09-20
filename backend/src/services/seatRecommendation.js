@@ -255,6 +255,12 @@ export const recommendSeats = (grid, n, options = {}) => {
     return null;
   }
 
+  // No arrangement can seat more people than there are free seats — return
+  // before Phase 2, which would otherwise try every row block, length order
+  // and anchor column before concluding the same thing.
+  const availableCount = grid.reduce((sum, row) => sum + row.filter(isAvailable).length, 0);
+  if (n > availableCount) return null;
+
   const totalRows = grid.length;
   const columns = grid.reduce((max, row) => Math.max(max, row.length), 0);
 
