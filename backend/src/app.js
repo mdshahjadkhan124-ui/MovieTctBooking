@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import { sanitizeInput } from "./middleware/sanitize.js";
+import { csrfGuard } from "./middleware/csrf.js";
 import { globalRateLimiter } from "./middleware/rateLimiters.js";
 import authRoutes from "./routes/authRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
@@ -79,6 +80,10 @@ app.get("/api/health", (req, res) => {
 // here. /api/auth/login and /api/auth/signup carry an additional, much
 // stricter limiter of their own (see authRoutes.js).
 app.use("/api", globalRateLimiter);
+
+// Mounted here (after the webhook route above) so Stripe's server-to-server
+// deliveries, which carry no browser headers, are exempt by construction.
+app.use("/api", csrfGuard);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);

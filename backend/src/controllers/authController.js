@@ -1,6 +1,7 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { generateToken, cookieOptions } from "../utils/generateToken.js";
 import * as authService from "../services/authService.js";
+import { revokeToken } from "../services/tokenDenylist.js";
 
 export const signup = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
@@ -19,6 +20,9 @@ export const login = asyncHandler(async (req, res) => {
 });
 
 export const logout = asyncHandler(async (req, res) => {
+  // Clearing the cookie only disarms this browser; revoking the token is
+  // what stops a copy of it being replayed from anywhere else.
+  await revokeToken(req.cookies?.token);
   res.clearCookie("token", cookieOptions());
   res.json({ success: true, data: {}, message: "Logged out" });
 });

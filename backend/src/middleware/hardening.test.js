@@ -142,7 +142,7 @@ describe("input sanitization (end-to-end, through the real app)", () => {
   it("a login body carrying MongoDB operators cannot bypass auth", async () => {
     const res = await fetch(`${realBaseUrl}/api/auth/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
       body: JSON.stringify({ email: { $gt: "" }, password: { $gt: "" } }),
     });
     expect(res.status).not.toBe(200);
@@ -157,13 +157,133 @@ describe("input sanitization (end-to-end, through the real app)", () => {
 
     const res = await fetch(`${realBaseUrl}/api/auth/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
       body: JSON.stringify({ email, password }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
 
+    await User.deleteOne({ email });
+  });
+});
+
+describe("CSRF protection", () => {
+  const login = (init = {}) =>
+    fetch(`${realBaseUrl}/api/auth/login`, {
+      method: "POST",
+      body: JSON.stringify({ email: "nobody@example.com", password: "whatever123" }),
+      ...init,
+      headers: { "Content-Type": "application/json", ...init.headers },
+    });
+
+  it("blocks a state-changing request that carries no X-Requested-With header (what an HTML form post looks like)", async () => {
+    const res = await login();
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("CSRF_BLOCKED");
+  });
+
+  it("blocks a state-changing request sent from another site's origin", async () => {
+    const res = await login({
+      headers: { "X-Requested-With": "XMLHttpRequest", Origin: "https://evil.example.com" },
+    });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("CSRF_BLOCKED");
+  });
+
+  it("blocks a cross-site Referer when the browser sent no Origin", async () => {
+    const res = await login({
+      headers: { "X-Requested-With": "XMLHttpRequest", Referer: "https://evil.example.com/attack" },
+    });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("CSRF_BLOCKED");
+  });
+
+  it("allows the real app's request — header present, own origin (login still reaches the handler)", async () => {
+    const res = await login({
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+        Origin: process.env.CLIENT_URL || "http://localhost:5173",
+      },
+    });
+    // 401 = the credentials were wrong, i.e. it got past CSRF to real auth.
+    expect(res.status).toBe(401);
+    expect((await res.json()).error.code).toBe("INVALID_CREDENTIALS");
+  });
+
+  it("leaves safe (GET) requests alone", async () => {
+    const res = await fetch(`${realBaseUrl}/api/movies`);
+    expect(res.status).toBe(200);
+  });
+
+  it("exempts the Stripe webhook, which has no browser headers to send", async () => {
+    const res = await fetch(`${realBaseUrl}/api/webhooks/stripe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Stripe-Signature": "t=1,v1=deadbeef" },
+      body: JSON.stringify({}),
+    });
+    // Rejected for a bad signature, not blocked as CSRF.
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("INVALID_SIGNATURE");
+  });
+});
+
+describe("session revocation on logout", () => {
+  const appJson = { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" };
+
+  const loginAs = async (email, password) => {
+    const res = await fetch(`${realBaseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: appJson,
+      body: JSON.stringify({ email, password }),
+    });
+    expect(res.status).toBe(200);
+    return res.headers.get("set-cookie").split(";")[0]; // "token=..."
+  };
+
+  it("a token copied before logout stops working afterwards", async () => {
+    const email = `revocation-test-${testRunId}@example.com`;
+    const password = "TestPass123!";
+    await User.create({ name: "Revocation Test", email, password });
+
+    // Imagine this cookie value was captured (shared machine, leaked log).
+    const stolenCookie = await loginAs(email, password);
+    const before = await fetch(`${realBaseUrl}/api/auth/me`, { headers: { Cookie: stolenCookie } });
+    expect(before.status).toBe(200);
+
+    await fetch(`${realBaseUrl}/api/auth/logout`, {
+      method: "POST",
+      headers: { ...appJson, Cookie: stolenCookie },
+    });
+
+    // The JWT itself is still perfectly valid and unexpired — only the
+    // denylist stops it.
+    const after = await fetch(`${realBaseUrl}/api/auth/me`, { headers: { Cookie: stolenCookie } });
+    expect(after.status).toBe(401);
+
+    await User.deleteOne({ email });
+  });
+
+  it("logging out one session doesn't revoke another session of the same user", async () => {
+    const email = `revocation-two-${testRunId}@example.com`;
+    const password = "TestPass123!";
+    await User.create({ name: "Two Sessions", email, password });
+
+    const laptop = await loginAs(email, password);
+    const phone = await loginAs(email, password);
+
+    await fetch(`${realBaseUrl}/api/auth/logout`, {
+      method: "POST",
+      headers: { ...appJson, Cookie: laptop },
+    });
+
+    expect((await fetch(`${realBaseUrl}/api/auth/me`, { headers: { Cookie: laptop } })).status).toBe(401);
+    expect((await fetch(`${realBaseUrl}/api/auth/me`, { headers: { Cookie: phone } })).status).toBe(200);
+
+    await fetch(`${realBaseUrl}/api/auth/logout`, {
+      method: "POST",
+      headers: { ...appJson, Cookie: phone },
+    });
     await User.deleteOne({ email });
   });
 });

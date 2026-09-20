@@ -1,7 +1,11 @@
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 
+// `jti` is a per-token id. It's what makes a specific token revocable at
+// logout (see services/tokenDenylist.js) — without it, every token signed
+// for a user is indistinguishable from every other.
 export const generateToken = (userId) =>
-  jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+  jwt.sign({ id: userId, jti: crypto.randomUUID() }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN,
   });
 
