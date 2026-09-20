@@ -46,8 +46,12 @@ const randomPastCreatedAt = () => {
   return date;
 };
 
-const buildBookingsForShowtime = (showtime, demoUsers) => {
-  const seatIds = buildSeatGrid(showtime.screen.layout)
+const buildBookingsForShowtime = (showtime, demoUsers, alreadyBookedSeatIds = new Set()) => {
+  // Seats already sold to someone real are excluded: this script used to
+  // build its grid from the layout alone, so a demo booking could land on a
+  // seat an actual customer had confirmed — two confirmed bookings for one
+  // seat, which the unique (showtime, seatIds) index now rejects outright.
+  const seatIds = buildSeatGrid(showtime.screen.layout, alreadyBookedSeatIds)
     .flat()
     .filter((seat) => seat.status === "available")
     .map((seat) => seat.id);
@@ -97,7 +101,29 @@ const run = async () => {
   }
 
   const demoUsers = await ensureDemoUsers();
-  const bookingDocs = showtimes.flatMap((showtime) => buildBookingsForShowtime(showtime, demoUsers));
+
+  // One query for every seat already confirmed across these showtimes, so a
+  // re-run tops up demo data around real bookings instead of colliding with
+  // them (and with whatever a previous run of this script created).
+  const confirmed = await Booking.find({
+    showtime: { $in: showtimes.map((s) => s._id) },
+    status: "confirmed",
+  }).select("showtime seatIds");
+  const bookedByShowtime = new Map();
+  for (const booking of confirmed) {
+    const key = booking.showtime.toString();
+    if (!bookedByShowtime.has(key)) bookedByShowtime.set(key, new Set());
+    const seats = bookedByShowtime.get(key);
+    for (const seatId of booking.seatIds) seats.add(seatId);
+  }
+
+  const bookingDocs = showtimes.flatMap((showtime) =>
+    buildBookingsForShowtime(
+      showtime,
+      demoUsers,
+      bookedByShowtime.get(showtime._id.toString()) ?? new Set()
+    )
+  );
 
   if (bookingDocs.length === 0) {
     console.log("Nothing to seed (no showtime had any available seats).");

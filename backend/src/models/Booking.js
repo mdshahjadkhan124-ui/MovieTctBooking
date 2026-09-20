@@ -27,6 +27,25 @@ const bookingSchema = new mongoose.Schema(
 );
 
 bookingSchema.index({ user: 1 });
+// Seat availability asks "which seats are confirmed-booked for this
+// showtime?" on every lock, every /locks poll, every pricing and
+// recommendation call — the hottest read in the app. The unique index below
+// can serve the showtime prefix for confirmed rows, but only this one covers
+// any status (the delete guard counts all bookings for a showtime) without
+// depending on that index's partial filter.
+bookingSchema.index({ showtime: 1, status: 1 });
+// The last line of defence against selling one seat twice. Redis locks make
+// that race vanishingly unlikely, but not impossible: a lock can expire in
+// the gap between the webhook verifying ownership and writing "confirmed".
+// This is multikey (seatIds is an array), so it enforces one CONFIRMED
+// booking per (showtime, seat) inside the database itself, no matter what
+// Redis believed. The partial filter is what keeps it from blocking
+// legitimate reuse — cancelled and failed bookings hold no claim on a seat,
+// so those seats stay bookable.
+bookingSchema.index(
+  { showtime: 1, seatIds: 1 },
+  { unique: true, partialFilterExpression: { status: "confirmed" } }
+);
 // Every analyticsService pipeline either scopes by theater, filters by
 // status, or both (revenue/cancellation-rate/top-movies/peak-times/
 // theater-performance) — one compound index serves all of them.
