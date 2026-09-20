@@ -1,7 +1,7 @@
 import "dotenv/config";
 import http from "node:http";
 import mongoose from "mongoose";
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import app from "../app.js";
 import { connectDB } from "../config/db.js";
 import { connectRedis } from "../config/redis.js";
@@ -156,6 +156,25 @@ const checkoutAndConfirm = async (showtimeDoc, seatIds) => {
   return bookingId;
 };
 
+// Creates an already-confirmed booking without touching Stripe. Used only by
+// tests whose subject is cancellation POLICY — ownership, the cancellation
+// window, the DB uniqueness guard — where a real card charge proves nothing
+// and just costs two network round trips. The payment path itself stays
+// covered end-to-end by the webhook tests and the refund tests, which still
+// run against Stripe's real test mode.
+const directConfirmedBooking = async (showtimeDoc, seatIds, { user = userId, amount = 200 } = {}) => {
+  const booking = await Booking.create({
+    user,
+    showtime: showtimeDoc._id,
+    theater: theater._id,
+    seatIds,
+    amount,
+    status: "confirmed",
+    paymentIntentId: `pi_direct_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+  });
+  return booking._id;
+};
+
 describe("booking checkout + Stripe webhook", () => {
   it("happy path: lock -> checkout -> succeeded webhook -> confirmed, locks consumed", async () => {
     const seatIds = ["A1", "A2"];
@@ -230,6 +249,103 @@ describe("booking checkout + Stripe webhook", () => {
     const refunds = await stripe.refunds.list({ payment_intent: booking.paymentIntentId });
     expect(refunds.data.length).toBeGreaterThan(0);
   }, 20000);
+
+  it("a seat can never end up in two confirmed bookings — the second is failed and refunded", async () => {
+    const seatIds = ["C4"];
+    // First buyer gets the seat for real.
+    const firstBookingId = await checkoutAndConfirm(showtime, seatIds);
+    expect((await Booking.findById(firstBookingId)).status).toBe("confirmed");
+
+    // Second buyer reproduces the race the DB index exists to catch: Redis
+    // has no memory of the confirmed booking (its lock was released on
+    // confirmation), so a fresh lock on the same seat succeeds and checkout
+    // goes through. The webhook then finds the ownership check passing even
+    // though the seat is already sold.
+    const otherUserId = new mongoose.Types.ObjectId().toString();
+    const raceLock = await seatLockService.acquireLocks(
+      showtime._id.toString(),
+      seatIds,
+      otherUserId
+    );
+    expect(raceLock.success).toBe(true);
+
+    const { bookingId: secondBookingId } = await bookingService.createCheckout(
+      otherUserId,
+      showtime._id.toString(),
+      seatIds
+    );
+    const secondBooking = await Booking.findById(secondBookingId);
+    const confirmedIntent = await stripe.paymentIntents.confirm(secondBooking.paymentIntentId, {
+      payment_method: "pm_card_visa",
+    });
+
+    const { status } = await signAndPost(succeededEvent(confirmedIntent));
+    expect(status).toBe(200);
+
+    // The second booking must NOT be confirmed, and must be refunded.
+    const resolved = await Booking.findById(secondBookingId);
+    expect(resolved.status).toBe("failed");
+    expect(resolved.refundStatus).toBe("completed");
+    expect(resolved.refundId).toBeTruthy();
+
+    // Exactly one confirmed booking holds this seat.
+    const confirmedForSeat = await Booking.countDocuments({
+      showtime: showtime._id,
+      status: "confirmed",
+      seatIds: "C4",
+    });
+    expect(confirmedForSeat).toBe(1);
+
+    await seatLockService.releaseLocksByToken(showtime._id.toString(), raceLock.token);
+  }, 30000);
+
+  it("a refund that fails at webhook time is completed by Stripe's redelivery", async () => {
+    const seatIds = ["C2", "C3"];
+    const lockResult = await seatLockService.acquireLocks(
+      showtime._id.toString(),
+      seatIds,
+      userId
+    );
+    expect(lockResult.success).toBe(true);
+
+    const { bookingId } = await bookingService.createCheckout(
+      userId,
+      showtime._id.toString(),
+      seatIds
+    );
+    const booking = await Booking.findById(bookingId);
+    const confirmedIntent = await stripe.paymentIntents.confirm(booking.paymentIntentId, {
+      payment_method: "pm_card_visa",
+    });
+
+    // Paid just as the hold expired -> the handler owes a full refund.
+    await seatLockService.shortenLockTtlForTests(showtime._id.toString(), seatIds, 50);
+    await waitForLockExpiry(showtime._id.toString(), seatIds);
+
+    const refundSpy = vi
+      .spyOn(stripe.refunds, "create")
+      .mockRejectedValueOnce(new Error("Stripe unavailable"));
+    const firstDelivery = await signAndPost(succeededEvent(confirmedIntent));
+    // A 500 is what makes Stripe retry the event rather than consider it handled.
+    expect(firstDelivery.status).toBe(500);
+    refundSpy.mockRestore();
+
+    const afterFailure = await Booking.findById(bookingId);
+    expect(afterFailure.status).toBe("failed");
+    expect(afterFailure.refundStatus).toBe("pending");
+    expect(afterFailure.refundId).toBeFalsy();
+
+    // Stripe's redelivery of the same event completes the missed refund.
+    const redelivery = await signAndPost(succeededEvent(confirmedIntent));
+    expect(redelivery.status).toBe(200);
+
+    const settled = await Booking.findById(bookingId);
+    expect(settled.refundStatus).toBe("completed");
+    expect(settled.refundId).toBeTruthy();
+
+    const refunds = await stripe.refunds.list({ payment_intent: settled.paymentIntentId });
+    expect(refunds.data.length).toBe(1);
+  }, 30000);
 
   it("duplicate webhook delivery is idempotent (no double-processing)", async () => {
     const seatIds = ["A3", "A4"];
@@ -451,6 +567,59 @@ describe("booking cancellation", () => {
     const refunds = await stripe.refunds.list({ payment_intent: first.booking.paymentIntentId });
     expect(refunds.data.length).toBe(1);
   }, 20000);
+
+  it("a Stripe failure while refunding leaves the refund owed-but-unpaid, and retrying completes it exactly once", async () => {
+    const seatIds = ["C1"];
+    const bookingId = await checkoutAndConfirm(showtimeFarFuture, seatIds);
+
+    // Only the first refund call fails — simulating Stripe being briefly
+    // unreachable at exactly the wrong moment.
+    const refundSpy = vi
+      .spyOn(stripe.refunds, "create")
+      .mockRejectedValueOnce(new Error("Stripe unavailable"));
+    await expect(bookingService.cancelBooking(userId, bookingId)).rejects.toMatchObject({
+      statusCode: 502,
+      code: "REFUND_NOT_COMPLETED",
+    });
+    refundSpy.mockRestore();
+
+    // The cancellation itself stands (seats released), but nothing claims
+    // the money was returned.
+    const afterFailure = await Booking.findById(bookingId);
+    expect(afterFailure.status).toBe("cancelled");
+    expect(afterFailure.refundStatus).toBe("pending");
+    expect(afterFailure.refundId).toBeFalsy();
+    expect(await getUnavailableSeatIds(showtimeFarFuture._id.toString())).not.toContain("C1");
+
+    // Retrying the same cancel finishes the refund instead of reporting
+    // "already cancelled" and keeping the money.
+    const retried = await bookingService.cancelBooking(userId, bookingId);
+    expect(retried.booking.refundStatus).toBe("completed");
+    expect(retried.booking.refundId).toBeTruthy();
+    expect(retried.refundAmount).toBe(afterFailure.refundAmount);
+
+    const refunds = await stripe.refunds.list({ payment_intent: afterFailure.paymentIntentId });
+    expect(refunds.data.length).toBe(1);
+  }, 30000);
+
+  it("a cancelled booking's seat can be booked again (the uniqueness guard only binds confirmed bookings)", async () => {
+    // The subject here is the database constraint, not the payment — so the
+    // refund is stubbed and the bookings are made directly.
+    const refundSpy = vi
+      .spyOn(stripe.refunds, "create")
+      .mockResolvedValue({ id: `re_stub_${Date.now()}` });
+
+    const seatIds = ["C5"];
+    const firstBookingId = await directConfirmedBooking(showtimeFarFuture, seatIds);
+    await bookingService.cancelBooking(userId, firstBookingId);
+
+    // Same seat, same showtime, brand new booking — must be allowed.
+    const secondBookingId = await directConfirmedBooking(showtimeFarFuture, seatIds);
+    expect((await Booking.findById(secondBookingId)).status).toBe("confirmed");
+    expect((await Booking.findById(firstBookingId)).status).toBe("cancelled");
+
+    refundSpy.mockRestore();
+  }, 30000);
 
   it("double-cancel (concurrent race) never double-refunds — only one of two simultaneous requests wins", async () => {
     const seatIds = ["B3"];

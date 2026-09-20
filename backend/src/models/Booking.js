@@ -15,12 +15,26 @@ const bookingSchema = new mongoose.Schema(
     // unique+sparse: every booking gets one at creation in practice, but
     // sparse keeps the door open for a future booking path that doesn't.
     paymentIntentId: { type: String, unique: true, sparse: true },
-    // Populated only when status is "cancelled" — refundAmount is 0 (not
-    // unset) for a within-6-hours cancellation, so its presence/absence
-    // isn't itself meaningful, only cancelledAt is (a cheap "was this ever
-    // cancelled" check without a status comparison).
+    // The amount owed back, decided when the cancellation (or a failed
+    // payment) was recorded — deliberately NOT recomputed later, so a
+    // retried refund can't be re-rated against a now-closer showtime.
+    // refundAmount is 0 (not unset) for a within-6-hours cancellation, so
+    // its presence/absence isn't itself meaningful, only cancelledAt is (a
+    // cheap "was this ever cancelled" check without a status comparison).
     refundAmount: { type: Number },
+    // Stripe's refund id — set only once Stripe has actually confirmed the
+    // refund, which is what makes it proof rather than intent.
     refundId: { type: String },
+    // Money owed vs money actually returned. "pending" means we owe a
+    // refund Stripe hasn't confirmed yet (e.g. the API call failed
+    // mid-cancellation): that state is what makes the refund resumable
+    // instead of silently lost. Absent on bookings where no refund was ever
+    // in play (pending/confirmed bookings, and anything created before this
+    // field existed).
+    refundStatus: {
+      type: String,
+      enum: ["not_required", "pending", "completed"],
+    },
     cancelledAt: { type: Date },
   },
   { timestamps: true }

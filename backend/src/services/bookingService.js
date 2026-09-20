@@ -111,12 +111,76 @@ export const getBookingById = async (userId, bookingId) => {
   return booking;
 };
 
+const refundPercentOf = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
+
+/**
+ * Pays out a refund that's recorded as owed ("pending") and only then marks
+ * it completed — so nothing is ever recorded as refunded before Stripe says
+ * it happened. Safe to call repeatedly:
+ *  - the idempotency key means a retry after a lost/failed response returns
+ *    the SAME Stripe refund instead of issuing a second one;
+ *  - the conditional update can't double-write;
+ *  - a booking that isn't owed a refund is a no-op.
+ */
+const settleRefund = async (booking) => {
+  if (booking.refundStatus !== "pending") return booking;
+
+  const refund = await stripe.refunds.create(
+    {
+      payment_intent: booking.paymentIntentId,
+      amount: Math.round(booking.refundAmount * 100),
+    },
+    { idempotencyKey: `refund_${booking._id}` }
+  );
+
+  const settled = await Booking.findOneAndUpdate(
+    { _id: booking._id, refundStatus: "pending" },
+    { refundId: refund.id, refundStatus: "completed" },
+    { returnDocument: "after" }
+  );
+  return settled ?? booking;
+};
+
+// Used on the request-driven path (cancellation): the cancellation itself
+// has already committed, so a Stripe failure must not look like "nothing
+// happened" — it reports what's true (cancelled, refund still owed) and
+// invites the retry that finishes it.
+const settleRefundOrReportPending = async (booking) => {
+  try {
+    return await settleRefund(booking);
+  } catch (err) {
+    console.error("Refund call failed; left pending for retry:", err);
+    throw new AppError(
+      "Your booking is cancelled and the seats are released, but the refund didn't go through. Please try again to complete the refund.",
+      502,
+      "REFUND_NOT_COMPLETED"
+    );
+  }
+};
+
 export const cancelBooking = async (userId, bookingId) => {
   const booking = await Booking.findById(bookingId).populate("showtime");
   if (!booking) throw new AppError("Booking not found", 404, "NOT_FOUND");
   if (booking.user.toString() !== userId) {
     throw new AppError("Not authorized to cancel this booking", 403, "FORBIDDEN");
   }
+
+  // A cancellation whose refund never went through is resumable, not lost:
+  // retrying the same cancel finishes the refund rather than reporting
+  // "already cancelled" while quietly keeping the money. It pays out the
+  // refundAmount stored when the cancellation was claimed, so retrying
+  // hours later can't re-rate it against a closer showtime.
+  if (booking.status === "cancelled" && booking.refundStatus === "pending") {
+    const settled = await settleRefundOrReportPending(booking);
+    await settled.populate(BOOKING_POPULATE);
+    return {
+      booking: settled,
+      refundPercent: refundPercentOf(settled.refundAmount, settled.amount),
+      refundAmount: settled.refundAmount,
+      reason: "Refund completed for a cancellation that was already recorded.",
+    };
+  }
+
   if (booking.status !== "confirmed") {
     throw new AppError(
       `Only confirmed bookings can be cancelled (this one is ${booking.status})`,
@@ -139,30 +203,29 @@ export const cancelBooking = async (userId, bookingId) => {
   // only caller that will ever process the refund for this booking — a
   // concurrent or retried cancel request finds nothing left to claim and
   // fails cleanly (ALREADY_CANCELLED) instead of double-refunding.
+  //
+  // The claim also records what's owed and that it's unpaid ("pending"),
+  // which is what survives a Stripe failure below and lets a retry finish
+  // the job.
   const claimed = await Booking.findOneAndUpdate(
     { _id: booking._id, status: "confirmed" },
-    { status: "cancelled", cancelledAt: new Date() },
+    {
+      status: "cancelled",
+      cancelledAt: new Date(),
+      refundAmount,
+      refundStatus: refundAmount > 0 ? "pending" : "not_required",
+    },
     { returnDocument: "after" }
   );
   if (!claimed) {
     throw new AppError("This booking was already cancelled", 409, "ALREADY_CANCELLED");
   }
 
-  if (refundAmount > 0) {
-    const refund = await stripe.refunds.create({
-      payment_intent: booking.paymentIntentId,
-      amount: Math.round(refundAmount * 100),
-    });
-    claimed.refundId = refund.id;
-  }
-  claimed.refundAmount = refundAmount;
-  await claimed.save();
-  await claimed.populate(BOOKING_POPULATE);
-
   // Cancelling frees the seats: getUnavailableSeatIds only counts
   // status: "confirmed" bookings, so this one's seatIds drop out of that
   // set the instant the status above changed — the broadcast just tells
-  // anyone already looking at this showtime, in real time.
+  // anyone already looking at this showtime, in real time. This runs before
+  // the refund so the seats are released even if the payout needs a retry.
   const showtimeId = booking.showtime._id.toString();
   emitSeatsUpdated(showtimeId, await getUnavailableSeatIds(showtimeId));
 
@@ -176,12 +239,46 @@ export const cancelBooking = async (userId, bookingId) => {
     console.error("Waitlist processing failed after cancellation:", err);
   }
 
-  return { booking: claimed, refundPercent, refundAmount, reason };
+  const settled = await settleRefundOrReportPending(claimed);
+  await settled.populate(BOOKING_POPULATE);
+
+  return { booking: settled, refundPercent, refundAmount, reason };
+};
+
+/**
+ * The "they paid but can't have the seats" outcome: mark the booking failed,
+ * recording the full charge as a refund we owe, then pay it back. Reached
+ * two ways — the hold expired before the webhook arrived, or the database
+ * refused the confirmation because another booking already holds a seat.
+ *
+ * Letting a Stripe failure throw here is deliberate: the resulting 500 makes
+ * Stripe redeliver the event, and the resume branch in handlePaymentSucceeded
+ * completes the refund on that delivery.
+ */
+const failAndRefund = async (booking) => {
+  const claimed = await Booking.findOneAndUpdate(
+    { _id: booking._id, status: "pending" },
+    { status: "failed", refundAmount: booking.amount, refundStatus: "pending" },
+    { returnDocument: "after" }
+  );
+  if (!claimed) return; // someone else resolved it first
+  await settleRefund(claimed);
 };
 
 const handlePaymentSucceeded = async (paymentIntent) => {
   const booking = await Booking.findOne({ paymentIntentId: paymentIntent.id });
-  if (!booking || booking.status !== "pending") return; // unknown or already resolved — idempotent no-op
+  if (!booking) return; // unknown payment intent
+
+  // Stripe redelivers any event whose handling failed. If what failed was
+  // the refund for a booking already marked failed, finish it here — the
+  // status check below would otherwise treat this as "already resolved" and
+  // no-op, leaving the customer charged for seats they never got.
+  if (booking.status === "failed" && booking.refundStatus === "pending") {
+    await settleRefund(booking);
+    return;
+  }
+
+  if (booking.status !== "pending") return; // already resolved — idempotent no-op
 
   const token = paymentIntent.metadata?.lockToken;
   const stillOwned = token
@@ -191,42 +288,56 @@ const handlePaymentSucceeded = async (paymentIntent) => {
         token
       )
     : false;
-  const intendedStatus = stillOwned ? "confirmed" : "failed";
+  if (!stillOwned) {
+    await failAndRefund(booking);
+    return;
+  }
 
-  // Atomically claim the pending -> intendedStatus transition. If a
-  // concurrent delivery of this same event already resolved this booking,
-  // this matches nothing and we skip the side effects below — that's what
-  // makes a re-delivered webhook safe to no-op rather than double-acting.
-  const claimed = await Booking.findOneAndUpdate(
-    { _id: booking._id, status: "pending" },
-    { status: intendedStatus }
-  );
+  // Atomically claim the pending -> confirmed transition. If a concurrent
+  // delivery of this same event already resolved this booking, this matches
+  // nothing and we skip the side effects below — that's what makes a
+  // re-delivered webhook safe to no-op rather than double-acting.
+  let claimed;
+  try {
+    claimed = await Booking.findOneAndUpdate(
+      { _id: booking._id, status: "pending" },
+      { status: "confirmed" },
+      { returnDocument: "after" }
+    );
+  } catch (err) {
+    // The unique (showtime, seatIds) index on confirmed bookings rejected
+    // this write: someone else's booking already holds one of these seats.
+    // That's the lock-expired-mid-confirmation race, caught by the database
+    // rather than by trusting Redis. Refund rather than sell the seat twice.
+    if (err?.code !== 11000) throw err;
+    console.error(
+      `Confirmation rejected: seats already confirmed elsewhere (booking ${booking._id})`
+    );
+    await failAndRefund(booking);
+    return;
+  }
   if (!claimed) return;
 
-  if (intendedStatus === "confirmed") {
-    const showtimeId = booking.showtime.toString();
-    // Checked before releasing the lock below — fulfillIfMatchingOffer only
-    // needs the seatIds, and doing this first means "was this booking the
-    // exclusive hold being exercised" is judged against the lock that was
-    // actually still there a moment ago, not after it's already gone.
-    try {
-      await waitlistService.fulfillIfMatchingOffer(
-        booking.user.toString(),
-        showtimeId,
-        booking.seatIds
-      );
-    } catch (err) {
-      console.error("Waitlist fulfillment check failed:", err);
-    }
-    await seatLockService.releaseLocksByToken(showtimeId, token);
-    // The lock is gone from Redis now, but getUnavailableSeatIds re-includes
-    // these seats via the Booking we just confirmed above — so the broadcast
-    // still shows them unavailable, permanently, not just until the lock
-    // would have expired.
-    emitSeatsUpdated(showtimeId, await getUnavailableSeatIds(showtimeId));
-  } else {
-    await stripe.refunds.create({ payment_intent: paymentIntent.id });
+  const showtimeId = booking.showtime.toString();
+  // Checked before releasing the lock below — fulfillIfMatchingOffer only
+  // needs the seatIds, and doing this first means "was this booking the
+  // exclusive hold being exercised" is judged against the lock that was
+  // actually still there a moment ago, not after it's already gone.
+  try {
+    await waitlistService.fulfillIfMatchingOffer(
+      booking.user.toString(),
+      showtimeId,
+      booking.seatIds
+    );
+  } catch (err) {
+    console.error("Waitlist fulfillment check failed:", err);
   }
+  await seatLockService.releaseLocksByToken(showtimeId, token);
+  // The lock is gone from Redis now, but getUnavailableSeatIds re-includes
+  // these seats via the Booking we just confirmed above — so the broadcast
+  // still shows them unavailable, permanently, not just until the lock
+  // would have expired.
+  emitSeatsUpdated(showtimeId, await getUnavailableSeatIds(showtimeId));
 };
 
 const handlePaymentFailed = async (paymentIntent) => {

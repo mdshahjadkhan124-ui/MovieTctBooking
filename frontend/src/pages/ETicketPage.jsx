@@ -32,6 +32,59 @@ const ETicketPage = () => {
 
   const showtime = booking.showtime;
 
+  // Deliberately no QR code and no ticket styling — a cancelled booking
+  // must never look like something that could be scanned at the door.
+  if (booking.status === "cancelled") {
+    return (
+      <section className="mx-auto max-w-md px-4 py-10">
+        <div className="rounded-lg border border-gray-200 px-5 py-5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-red-600">
+            Booking cancelled
+          </p>
+          <h1 className="mt-1 text-lg font-semibold text-gray-900">{showtime?.movie?.title}</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            This ticket is no longer valid and can't be used for entry.
+          </p>
+          <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <dt className="text-xs text-gray-400">Showtime</dt>
+              <dd className="text-gray-700">{new Date(showtime?.startTime).toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400">Seats</dt>
+              <dd className="text-gray-700">{booking.seatIds.join(", ")}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400">Refund</dt>
+              <dd className="text-gray-700">
+                &#8377;{booking.refundAmount ?? 0}
+                {booking.refundStatus === "pending" && (
+                  <span className="text-gray-500"> (processing)</span>
+                )}
+              </dd>
+            </div>
+            {booking.cancelledAt && (
+              <div>
+                <dt className="text-xs text-gray-400">Cancelled on</dt>
+                <dd className="text-gray-700">{new Date(booking.cancelledAt).toLocaleString()}</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+      </section>
+    );
+  }
+
+  // Only a confirmed booking gets a ticket — any other status reaching here
+  // shouldn't render something that looks valid either.
+  if (booking.status !== "confirmed") {
+    return (
+      <p className="px-8 py-24 text-center text-sm text-gray-500">
+        No valid ticket exists for this booking.
+      </p>
+    );
+  }
+
   return (
     <section className="mx-auto max-w-md px-4 py-10 print:py-0">
       <div className="overflow-hidden rounded-lg border border-gray-200 shadow-sm">
