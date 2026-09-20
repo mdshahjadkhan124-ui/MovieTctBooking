@@ -116,6 +116,20 @@ export const deleteShowtime = async (user, id) => {
   const showtime = await Showtime.findById(id);
   if (!showtime) throw new AppError("Showtime not found", 404, "NOT_FOUND");
   assertTheaterAccess(user, showtime.theater);
+
+  // Any booking — including cancelled and failed ones — reads its movie,
+  // screen and times through this showtime, so deleting it would break a
+  // customer's own booking history. `isActive: false` pulls a showtime from
+  // sale without destroying that history.
+  const bookingCount = await Booking.countDocuments({ showtime: id });
+  if (bookingCount > 0) {
+    throw new AppError(
+      `Can't delete this showtime — ${bookingCount} booking(s) reference it. Deactivate it instead.`,
+      409,
+      "HAS_DEPENDENTS"
+    );
+  }
+
   await showtime.deleteOne();
 };
 

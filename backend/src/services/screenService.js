@@ -1,5 +1,6 @@
 import { Screen } from "../models/Screen.js";
 import { Theater } from "../models/Theater.js";
+import { Showtime } from "../models/Showtime.js";
 import { AppError } from "../utils/AppError.js";
 import { assertTheaterAccess } from "../utils/assertTheaterAccess.js";
 
@@ -32,6 +33,18 @@ export const deleteScreen = async (user, id) => {
   const screen = await Screen.findById(id);
   if (!screen) throw new AppError("Screen not found", 404, "NOT_FOUND");
   assertTheaterAccess(user, screen.theater);
+
+  // A screen carries the seat layout every showtime's seat grid is derived
+  // from; deleting it would leave those showtimes unrenderable.
+  const showtimeCount = await Showtime.countDocuments({ screen: id });
+  if (showtimeCount > 0) {
+    throw new AppError(
+      `Can't delete this screen — it still has ${showtimeCount} showtime(s).`,
+      409,
+      "HAS_DEPENDENTS"
+    );
+  }
+
   await screen.deleteOne();
 };
 

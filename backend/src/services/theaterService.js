@@ -1,4 +1,6 @@
 import { Theater } from "../models/Theater.js";
+import { Screen } from "../models/Screen.js";
+import { Showtime } from "../models/Showtime.js";
 import { AppError } from "../utils/AppError.js";
 
 export const createTheater = (data) => Theater.create(data);
@@ -13,6 +15,21 @@ export const updateTheater = async (id, updates) => {
 };
 
 export const deleteTheater = async (id) => {
+  // Screens and showtimes both reference a theater; bookings reference it
+  // directly too (denormalized for analytics). Deleting one out from under
+  // them orphans all of it — `isActive: false` is the way to retire a venue.
+  const [screenCount, showtimeCount] = await Promise.all([
+    Screen.countDocuments({ theater: id }),
+    Showtime.countDocuments({ theater: id }),
+  ]);
+  if (screenCount > 0 || showtimeCount > 0) {
+    throw new AppError(
+      `Can't delete this theater — it still has ${screenCount} screen(s) and ${showtimeCount} showtime(s). Deactivate it instead.`,
+      409,
+      "HAS_DEPENDENTS"
+    );
+  }
+
   const theater = await Theater.findByIdAndDelete(id);
   if (!theater) throw new AppError("Theater not found", 404, "NOT_FOUND");
 };

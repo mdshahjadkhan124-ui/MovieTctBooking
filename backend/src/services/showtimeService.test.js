@@ -12,6 +12,9 @@ import { Screen } from "../models/Screen.js";
 import { Showtime } from "../models/Showtime.js";
 import { User } from "../models/User.js";
 import * as showtimeService from "./showtimeService.js";
+import * as movieService from "./movieService.js";
+import * as theaterService from "./theaterService.js";
+import * as screenService from "./screenService.js";
 
 const runId = Date.now();
 
@@ -137,6 +140,62 @@ describe("showtimeService.lockSeats", () => {
       statusCode: 400,
       code: "INVALID_SEATS",
     });
+  });
+});
+
+describe("delete guards (nothing is deleted out from under its dependents)", () => {
+  const superAdmin = { role: "super_admin" };
+
+  it("refuses to delete a movie that still has showtimes", async () => {
+    await expect(movieService.deleteMovie(movie._id.toString())).rejects.toMatchObject({
+      statusCode: 409,
+      code: "HAS_DEPENDENTS",
+    });
+    expect(await Movie.findById(movie._id)).not.toBeNull();
+  });
+
+  it("refuses to delete a theater that still has screens or showtimes", async () => {
+    await expect(theaterService.deleteTheater(theater._id.toString())).rejects.toMatchObject({
+      statusCode: 409,
+      code: "HAS_DEPENDENTS",
+    });
+    expect(await Theater.findById(theater._id)).not.toBeNull();
+  });
+
+  it("refuses to delete a screen that still has showtimes", async () => {
+    await expect(
+      screenService.deleteScreen(superAdmin, screen._id.toString())
+    ).rejects.toMatchObject({ statusCode: 409, code: "HAS_DEPENDENTS" });
+    expect(await Screen.findById(screen._id)).not.toBeNull();
+  });
+
+  it("refuses to delete a showtime that bookings reference", async () => {
+    // A booking was created against this showtime earlier in this file.
+    await expect(
+      showtimeService.deleteShowtime(superAdmin, showtime._id.toString())
+    ).rejects.toMatchObject({ statusCode: 409, code: "HAS_DEPENDENTS" });
+    expect(await Showtime.findById(showtime._id)).not.toBeNull();
+  });
+
+  it("still deletes records nothing depends on", async () => {
+    const spareMovie = await Movie.create({ title: "Unused Movie", durationMinutes: 90 });
+    const spareTheater = await Theater.create({
+      name: "Unused Theater",
+      location: { city: "Testville" },
+    });
+    const spareScreen = await Screen.create({
+      theater: spareTheater._id,
+      name: "Unused Screen",
+      layout: { rows: 1, columns: 2 },
+    });
+
+    await screenService.deleteScreen(superAdmin, spareScreen._id.toString());
+    await theaterService.deleteTheater(spareTheater._id.toString());
+    await movieService.deleteMovie(spareMovie._id.toString());
+
+    expect(await Screen.findById(spareScreen._id)).toBeNull();
+    expect(await Theater.findById(spareTheater._id)).toBeNull();
+    expect(await Movie.findById(spareMovie._id)).toBeNull();
   });
 });
 

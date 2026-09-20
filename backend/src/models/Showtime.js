@@ -28,6 +28,10 @@ const showtimeSchema = new mongoose.Schema(
 );
 
 showtimeSchema.index({ screen: 1, startTime: 1 });
+// "Showtimes for this movie" backs the movie detail page and the admin
+// filter, and the movie delete guard counts against it. Without this it's a
+// full collection scan of every showtime ever created.
+showtimeSchema.index({ movie: 1, startTime: 1 });
 // analyticsService's occupancy pipeline scopes Showtime by theater for a
 // theater_admin's role-scoped view.
 showtimeSchema.index({ theater: 1 });

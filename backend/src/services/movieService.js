@@ -15,6 +15,19 @@ export const updateMovie = async (id, updates) => {
 };
 
 export const deleteMovie = async (id) => {
+  // Deleting a movie that still has showtimes would leave those showtimes
+  // (and any bookings under them) pointing at nothing — the e-ticket and
+  // booking history both read the movie title through that reference.
+  // Retiring a movie is what `isActive: false` is for.
+  const showtimeCount = await Showtime.countDocuments({ movie: id });
+  if (showtimeCount > 0) {
+    throw new AppError(
+      `Can't delete this movie — it still has ${showtimeCount} showtime(s). Deactivate it instead.`,
+      409,
+      "HAS_DEPENDENTS"
+    );
+  }
+
   const movie = await Movie.findByIdAndDelete(id);
   if (!movie) throw new AppError("Movie not found", 404, "NOT_FOUND");
 };
