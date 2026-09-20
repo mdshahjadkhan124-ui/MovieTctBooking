@@ -19,7 +19,9 @@ const start = async () => {
   // Socket.IO needs the raw http.Server (not the Express app) so it can
   // upgrade connections to WebSocket on the same port as the REST API.
   const httpServer = http.createServer(app);
-  initSocket(httpServer);
+  // Awaited: the Redis pub/sub adapter must be attached before the first
+  // client can connect, or early broadcasts wouldn't cross instances.
+  await initSocket(httpServer);
 
   // Catches waitlist holds that expired in Redis, which emits no event —
   // the event-driven triggers (cancel/release/leave) handle everything else.

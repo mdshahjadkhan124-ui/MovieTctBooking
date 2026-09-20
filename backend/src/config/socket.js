@@ -1,7 +1,36 @@
 import { Server } from "socket.io";
+import { createAdapter } from "@socket.io/redis-adapter";
 import jwt from "jsonwebtoken";
+import { getRedisClient } from "./redis.js";
 
 let io;
+let adapterClients = [];
+
+// Socket.IO's default adapter keeps rooms in the process's own memory, so
+// with more than one instance a `seatsUpdated` emitted by the instance that
+// handled the lock reaches only the viewers connected to THAT instance —
+// everyone else silently sees a stale seat map. The Redis adapter puts those
+// broadcasts on a pub/sub channel every instance reads, which is what makes
+// horizontal scaling safe. Room/emit code elsewhere stays exactly the same.
+//
+// Falls back to the in-memory adapter if Redis pub/sub can't be set up: a
+// degraded single-instance broadcast is better than refusing to start.
+const attachRedisAdapter = async (server) => {
+  try {
+    const pubClient = getRedisClient().duplicate();
+    const subClient = pubClient.duplicate();
+    await Promise.all([pubClient.connect(), subClient.connect()]);
+    adapterClients = [pubClient, subClient];
+    server.adapter(createAdapter(pubClient, subClient));
+    return true;
+  } catch (err) {
+    console.error(
+      "Socket.IO Redis adapter unavailable — falling back to in-memory broadcasts (correct only on a single instance):",
+      err
+    );
+    return false;
+  }
+};
 
 // socket.handshake has no cookie-parser middleware in front of it — parse
 // the raw Cookie header by hand rather than pulling in a dependency for one
@@ -19,17 +48,18 @@ const parseCookies = (cookieHeader = "") =>
 
 // Rooms are per-showtime (`showtime:{id}`) so a seat lock/release only
 // broadcasts to clients actually looking at that showtime, not every
-// connected client. Scaling to multiple server instances later just needs
-// io.adapter(createAdapter(pubClient, subClient)) here, reusing the Redis
-// client this project already has (config/redis.js) — nothing about the
-// room/emit shape below would need to change.
-export const initSocket = (httpServer) => {
+// connected client. That room shape is unchanged by the Redis adapter
+// attached below — the adapter only decides how far a broadcast travels,
+// not who it's addressed to.
+export const initSocket = async (httpServer) => {
   io = new Server(httpServer, {
     cors: {
       origin: process.env.CLIENT_URL || "http://localhost:5173",
       credentials: true,
     },
   });
+
+  await attachRedisAdapter(io);
 
   // Best-effort identity from the same httpOnly JWT cookie `protect` reads.
   // Auth is optional here, not required — anonymous viewers still need
@@ -77,6 +107,14 @@ export const initSocket = (httpServer) => {
 };
 
 export const getIO = () => io;
+
+/** Closes the server and the adapter's own Redis connections. */
+export const closeSocket = async () => {
+  if (io) await io.close();
+  await Promise.all(adapterClients.map((client) => client.quit().catch(() => {})));
+  adapterClients = [];
+  io = null;
+};
 
 /**
  * Broadcasts the current locked-seat list to everyone viewing this showtime.
