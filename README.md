@@ -113,7 +113,7 @@ The movie catalog is real data (titles, posters, cast, ratings, certification) f
 | Payments | Stripe (test mode), webhook-driven commit |
 | Real-time | Socket.io |
 | Auth | JWT (httpOnly cookies) + bcrypt, role-based access control |
-| Testing | Vitest — 81 tests; isolated in-memory MongoDB (`mongodb-memory-server`) for deterministic runs, real Upstash Redis + Stripe test-mode for everything else |
+| Testing | Vitest — 158 backend tests, split into a secretless `unit` project and an `integration` project; isolated in-memory MongoDB (`mongodb-memory-server`), real Upstash Redis + Stripe test-mode for the integration suites |
 | Infra | Vercel (frontend), Render (backend), MongoDB Atlas, Upstash Redis |
 
 ---
@@ -144,7 +144,14 @@ Theater ──< Screen ──< Showtime >── Movie
 
 ## ✅ Testing
 
-**81 tests, all passing**, run with Vitest against **real Redis (Upstash) and Stripe's real test-mode API** — not mocks. That's a deliberate choice: a mocked integration test can pass while the real integration is broken (a Redis command that doesn't do quite what you assumed, a Stripe webhook payload shape that changed) — hitting the genuine services catches that class of bug before production does.
+**158 backend tests, all passing**, split into two Vitest projects:
+
+- **`npm run test:unit`** — 69 pure-logic tests (recommendation engine, pricing, refund policy, seat grid, timezone, pagination) in well under a second, with **no database, no Redis, no Stripe and no secrets**. A fresh clone or a CI job without credentials can run these.
+- **`npm run test:integration`** — everything that's only meaningful against the real thing: seat-locking races, webhook idempotency, refund behaviour, analytics aggregation.
+
+The integration suites deliberately run against **real Redis (Upstash) and Stripe's real test-mode API** rather than mocks: a mocked integration test can pass while the real integration is broken (a Redis command that doesn't do quite what you assumed, a Stripe webhook payload shape that changed). Stripe is only stubbed where it *isn't* the subject — cancellation tests about ownership, refund windows or the database's uniqueness guard build a confirmed booking directly instead of paying for a real card charge to prove a policy rule. Every path where money actually moves still goes through Stripe end-to-end.
+
+**Duplicated logic is guarded by parity tests.** `buildSeatGrid` and the refund tiers exist in both apps (the frontend deploys from `frontend/`, the backend from `backend/`, so neither build can import the other's files). The backend owns them, `npm run sync:shared` regenerates the frontend copy, and tests import *both* implementations and fail if they ever diverge — including that the UI's quoted refund matches the server's to the rupee, so a user can never be shown one number and paid another.
 
 MongoDB is the one exception, and it's isolated on purpose: every test run spins up a fresh **in-memory MongoDB** (`mongodb-memory-server`, wired in via a Vitest `globalSetup`) instead of connecting to the shared dev database. That fixed a real, previously-flaky test: an analytics query asserting "my 3 low-volume fixture movies rank in the global top-N" would eventually fail on its own as real seed data grew and crowded them out of the ranking — not a bug in the app, but the test wasn't isolated. An in-memory instance sidesteps that permanently without weakening the assertion, and as a side effect, running `npm test` locally needs no real `MONGO_URI` at all.
 
@@ -200,7 +207,8 @@ npm run dev
 
 ### Tests
 ```bash
-cd backend && npm test     # 81 backend tests
+cd backend && npm test             # all 158 backend tests
+cd backend && npm run test:unit    # 69 pure-logic tests, ~0.6s, no DB/Redis/Stripe/secrets
 cd frontend && npm test    # frontend unit tests (seat grid construction)
 ```
 

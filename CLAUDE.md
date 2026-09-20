@@ -69,7 +69,7 @@ Exact schema shapes are finalized per-sprint in planning. Do not invent fields
 5. Seat locking (concurrency-safe, Redis TTL keys) — ✅ DONE
 6. Booking-commit flow (locks → Mongo Booking, concurrency-safe) + Stripe payment (test mode) + booking confirmation — ✅ DONE
 7. Polish: search / filter, booking history, e-ticket with QR code, wire `GET /locks` into the seat grid — ✅ DONE
-8. Testing + deployment — ✅ DONE (81 backend tests incl. concurrency/idempotency races, deployed live: Vercel + Render + Atlas + Upstash)
+8. Testing + deployment — ✅ DONE (158 backend tests incl. concurrency/idempotency races, deployed live: Vercel + Render + Atlas + Upstash)
 
 No sprint is currently active — later work (UI redesign, city/theater density,
 frontend performance, test isolation, dependency audit) happened ad hoc
@@ -211,9 +211,15 @@ AUTH_RATE_LIMIT_MAX=
 WAITLIST_SWEEP_INTERVAL_MS=  # optional — see services/waitlistSweeper.js
 ```
 
-`MONGO_URI` is not needed to run the backend test suite — tests connect to an
-isolated in-memory MongoDB instead (`vitest.global-setup.js`); it's only for
-`npm run dev` and the seed scripts.
+`MONGO_URI` is not needed to run the backend test suite — the integration
+tests connect to an isolated in-memory MongoDB instead
+(`vitest.global-setup.js`); it's only for `npm run dev` and the seed scripts.
+
+The suite is split into two Vitest projects (see `vitest.config.js`):
+`npm run test:unit` is pure logic and needs **no** database, Redis, Stripe or
+secrets at all; `npm run test:integration` is everything that's only
+meaningful against the real thing (locking races, webhook idempotency,
+refunds, analytics). `npm test` runs both.
 
 ---
 

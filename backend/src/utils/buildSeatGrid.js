@@ -17,7 +17,7 @@ const categoryForRow = (rowLetter, seatCategories) => {
  * frontend's identical utility.
  *
  * @param {{ rows: number, columns: number, seatCategories?: Array<{category: string, rows: string[]}>, unavailableSeats?: string[] }} layout
- * @param {Set<string>} bookedSeats - real booked-seat data arrives in Sprint 5; defaults to empty.
+ * @param {Set<string>} bookedSeats - seat ids to mark "booked"; callers that need live availability pass showtimeService.getUnavailableSeatIds (active locks + confirmed bookings). Defaults to empty.
  * @returns {Array<Array<{ id: string, row: string, col: number, category: string, status: 'available'|'unavailable'|'booked' }>>}
  */
 export const buildSeatGrid = (layout, bookedSeats = new Set()) => {

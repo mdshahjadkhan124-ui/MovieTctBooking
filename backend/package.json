@@ -9,7 +9,10 @@
     "seed:admin": "node src/seed/seedSuperAdmin.js",
     "seed:catalog": "node src/seed/seedCatalog.js",
     "seed:analytics-demo": "node src/seed/seedAnalyticsDemo.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sync:shared": "node scripts/syncSharedCode.js",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
   },
   "keywords": [],
   "author": "",

@@ -488,24 +488,24 @@ describe("booking cancellation", () => {
   }, 20000);
 
   it("less than 6 hours before showtime -> 0% refund, still cancels, no Stripe refund created", async () => {
-    const seatIds = ["A3"];
-    const bookingId = await checkoutAndConfirm(showtimeVerySoon, seatIds);
-    const original = await Booking.findById(bookingId);
-    const refundsBefore = await stripe.refunds.list({ payment_intent: original.paymentIntentId });
+    const bookingId = await directConfirmedBooking(showtimeVerySoon, ["A3"]);
+    // Asserting Stripe is never asked for a refund is stronger (and faster)
+    // than comparing refund lists before and after.
+    const refundSpy = vi.spyOn(stripe.refunds, "create");
 
     const result = await bookingService.cancelBooking(userId, bookingId);
     expect(result.refundPercent).toBe(0);
     expect(result.refundAmount).toBe(0);
     expect(result.booking.status).toBe("cancelled");
     expect(result.booking.refundId).toBeFalsy();
+    expect(result.booking.refundStatus).toBe("not_required");
+    expect(refundSpy).not.toHaveBeenCalled();
 
-    const refundsAfter = await stripe.refunds.list({ payment_intent: original.paymentIntentId });
-    expect(refundsAfter.data.length).toBe(refundsBefore.data.length);
+    refundSpy.mockRestore();
   }, 20000);
 
   it("after showtime has started -> cancellation rejected, booking stays confirmed", async () => {
-    const seatIds = ["A4"];
-    const bookingId = await checkoutAndConfirm(showtimeStarted, seatIds);
+    const bookingId = await directConfirmedBooking(showtimeStarted, ["A4"]);
 
     await expect(bookingService.cancelBooking(userId, bookingId)).rejects.toMatchObject({
       statusCode: 409,
@@ -517,8 +517,7 @@ describe("booking cancellation", () => {
   }, 20000);
 
   it("only the booking's owner can cancel it", async () => {
-    const seatIds = ["A5"];
-    const bookingId = await checkoutAndConfirm(showtimeFarFuture, seatIds);
+    const bookingId = await directConfirmedBooking(showtimeFarFuture, ["A5"]);
     const otherUserId = new mongoose.Types.ObjectId().toString();
 
     await expect(bookingService.cancelBooking(otherUserId, bookingId)).rejects.toMatchObject({
@@ -531,14 +530,17 @@ describe("booking cancellation", () => {
   }, 20000);
 
   it("cancelling a non-confirmed (pending) booking is rejected", async () => {
-    const seatIds = ["B1"];
-    await seatLockService.acquireLocks(showtimeFarFuture._id.toString(), seatIds, userId);
-    const { bookingId } = await bookingService.createCheckout(
-      userId,
-      showtimeFarFuture._id.toString(),
-      seatIds
-    );
-    // Deliberately never confirmed via webhook — stays "pending".
+    // A booking that never got its webhook — no Stripe call needed to make one.
+    const pending = await Booking.create({
+      user: userId,
+      showtime: showtimeFarFuture._id,
+      theater: theater._id,
+      seatIds: ["B1"],
+      amount: 200,
+      status: "pending",
+      paymentIntentId: `pi_pending_${Date.now()}`,
+    });
+    const bookingId = pending._id;
 
     await expect(bookingService.cancelBooking(userId, bookingId)).rejects.toMatchObject({
       statusCode: 409,
