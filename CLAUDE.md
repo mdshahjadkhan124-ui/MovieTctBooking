@@ -208,6 +208,7 @@ RATE_LIMIT_WINDOW_MS=  # optional — see middleware/rateLimiters.js
 RATE_LIMIT_MAX=
 AUTH_RATE_LIMIT_WINDOW_MS=
 AUTH_RATE_LIMIT_MAX=
+WAITLIST_SWEEP_INTERVAL_MS=  # optional — see services/waitlistSweeper.js
 ```
 
 `MONGO_URI` is not needed to run the backend test suite — tests connect to an

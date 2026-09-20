@@ -83,12 +83,11 @@ export const releaseLock = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { released }, message: "" });
 });
 
+// Read-only, deliberately: this endpoint is polled every few seconds by every
+// visitor watching a showtime. Expired waitlist offers are reconciled by the
+// background sweeper (services/waitlistSweeper.js) instead of piggybacking
+// writes onto a GET.
 export const lockStatus = asyncHandler(async (req, res) => {
-  // No Redis keyspace notifications wired up, so an expired offer otherwise
-  // sits un-reconciled until something checks — this frequently-polled read
-  // is the low-cost opportunistic checkpoint that catches it (see
-  // waitlistService's processWaitlist doc comment).
-  await processWaitlistSafely(req.params.id);
   const lockedSeatIds = await showtimeService.getLockedSeats(req.params.id);
   res.json({ success: true, data: { lockedSeatIds }, message: "" });
 });
