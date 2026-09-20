@@ -10,6 +10,7 @@ import { recommendSeats } from "./seatRecommendation.js";
 import * as seatLockService from "./seatLockService.js";
 import { emitSeatsUpdated } from "../config/socket.js";
 import { calculateSeatPrice } from "./pricingService.js";
+import { zonedDayRange } from "../utils/timezone.js";
 
 const getConfirmedBookedSeatIds = async (showtimeId) => {
   const bookings = await Booking.find({ showtime: showtimeId, status: "confirmed" }).select(
@@ -215,7 +216,11 @@ export const getLockedSeats = (showtimeId) => getUnavailableSeatIds(showtimeId);
  * last saw here.
  */
 export const getSeatPricing = async (showtimeId) => {
-  const showtime = await Showtime.findById(showtimeId).populate("screen");
+  // theater is pulled in for its timezone: time-of-day pricing is decided on
+  // the cinema's clock, not the server's.
+  const showtime = await Showtime.findById(showtimeId)
+    .populate("screen")
+    .populate("theater", "timezone");
   if (!showtime || !showtime.isActive) {
     throw new AppError("Showtime not found", 404, "NOT_FOUND");
   }
@@ -227,8 +232,15 @@ export const getSeatPricing = async (showtimeId) => {
   const unavailableSeatIds = await getUnavailableSeatIds(showtimeId);
   const occupancy = allSeats.length > 0 ? unavailableSeatIds.length / allSeats.length : 0;
 
+  const timeZone = showtime.theater?.timezone;
   const seatPrices = allSeats.map((seat) => {
-    const { finalPrice, breakdown } = calculateSeatPrice(showtime.price, seat, showtime, occupancy);
+    const { finalPrice, breakdown } = calculateSeatPrice(
+      showtime.price,
+      seat,
+      showtime,
+      occupancy,
+      timeZone
+    );
     return { seatId: seat.id, category: seat.category, finalPrice, breakdown };
   });
 
@@ -249,10 +261,12 @@ export const listPublicShowtimes = async (filters = {}) => {
   }
 
   if (filters.date) {
-    const start = new Date(filters.date);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
+    // "Showtimes on the 19th" means the 19th where the cinema is. Computed
+    // in the app's timezone rather than the server's, so the same query
+    // returns the same day's shows in dev (IST) and on Render (UTC).
+    // Per-theater zones would need one range per zone; every venue here is
+    // in one country, so the default zone is the honest simplification.
+    const { start, end } = zonedDayRange(filters.date);
     query.startTime = { $gte: start, $lt: end };
   }
 

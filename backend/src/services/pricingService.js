@@ -2,6 +2,7 @@
 // named constant so the surge rules are one place to read and tune, not
 // buried inline. Nothing in this file touches Mongo/Redis; callers compute
 // occupancy (via showtimeService.getUnavailableSeatIds) and pass it in.
+import { zonedWeekdayAndHour, DEFAULT_TIMEZONE } from "../utils/timezone.js";
 
 // Tiered by % of seats currently locked-or-booked for the showtime.
 // maxOccupancy is exclusive except the last tier (Infinity catches 100%).
@@ -46,18 +47,11 @@ const getPositionFactor = (seat, totalColumns) => {
   return { multiplier: POSITION_MULTIPLIERS.REGULAR, label: "Regular seat" };
 };
 
-// Note: reads the showtime's startTime with the server process's local
-// timezone (Date#getDay/getHours), same level of timezone-awareness as the
-// rest of this codebase (nothing else here is timezone-aware either). If
-// the server ever runs in a different timezone than the showtimes are
-// scheduled in, "weekend"/"prime time" would be computed against the wrong
-// clock — a real caveat, not addressed here since it's outside this
-// feature's scope.
-const getTimeFactor = (startTime) => {
-  const date = new Date(startTime);
-  const day = date.getDay(); // 0 = Sunday, 6 = Saturday
-  const hour = date.getHours();
-  const isWeekend = day === 0 || day === 6;
+// Read in the THEATER's timezone, not the server's. A 7pm show in Bengaluru
+// is prime time for the people buying tickets to it; on Render (UTC) the
+// server's own clock would call that 13:30 and quietly drop the surge.
+const getTimeFactor = (startTime, timeZone) => {
+  const { hour, isWeekend } = zonedWeekdayAndHour(startTime, timeZone);
   const isPrimeTime = hour >= PRIME_TIME_START_HOUR && hour < PRIME_TIME_END_HOUR;
 
   if (isWeekend || isPrimeTime) {
@@ -75,14 +69,22 @@ const getTimeFactor = (startTime) => {
  * buildSeatGrid's flattened output ({ id, row, col, category, status });
  * `showtime` must have `.screen.layout.columns` and `.startTime` available
  * (populate("screen") first). `occupancy` is a 0-1 fraction the caller
- * computes from getUnavailableSeatIds().
+ * computes from getUnavailableSeatIds(). `timeZone` is the theater's zone —
+ * callers pass it so time-of-day pricing means the cinema's clock; it falls
+ * back to the app default for older records that have none.
  */
-export const calculateSeatPrice = (basePrice, seat, showtime, occupancy) => {
+export const calculateSeatPrice = (
+  basePrice,
+  seat,
+  showtime,
+  occupancy,
+  timeZone = DEFAULT_TIMEZONE
+) => {
   const totalColumns = showtime?.screen?.layout?.columns ?? 0;
 
   const occupancyFactor = getOccupancyFactor(occupancy);
   const positionFactor = getPositionFactor(seat, totalColumns);
-  const timeFactor = getTimeFactor(showtime.startTime);
+  const timeFactor = getTimeFactor(showtime.startTime, timeZone);
 
   const rawPrice =
     basePrice * occupancyFactor.multiplier * positionFactor.multiplier * timeFactor.multiplier;

@@ -15,7 +15,7 @@ import * as waitlistService from "./waitlistService.js";
 // displayed. There is no `price` field anywhere in the checkout request
 // body (validateCheckoutRequest only looks at showtimeId/seatIds), so a
 // client-sent price isn't rejected so much as structurally never read.
-const priceSelectedSeats = async (showtime, seatIds) => {
+const priceSelectedSeats = async (showtime, seatIds, timeZone) => {
   const seatsById = new Map(buildSeatGrid(showtime.screen.layout).flat().map((s) => [s.id, s]));
   const unavailableSeatIds = await getUnavailableSeatIds(showtime._id.toString());
   const totalSeats = seatsById.size;
@@ -26,7 +26,13 @@ const priceSelectedSeats = async (showtime, seatIds) => {
   for (const seatId of seatIds) {
     const seat = seatsById.get(seatId);
     if (!seat) throw new AppError(`Unknown seat: ${seatId}`, 400, "INVALID_SEATS");
-    const { finalPrice, breakdown } = calculateSeatPrice(showtime.price, seat, showtime, occupancy);
+    const { finalPrice, breakdown } = calculateSeatPrice(
+      showtime.price,
+      seat,
+      showtime,
+      occupancy,
+      timeZone
+    );
     amount += finalPrice;
     priceBreakdown.push({ seatId, finalPrice, breakdown });
   }
@@ -34,7 +40,11 @@ const priceSelectedSeats = async (showtime, seatIds) => {
 };
 
 export const createCheckout = async (userId, showtimeId, seatIds) => {
-  const showtime = await Showtime.findById(showtimeId).populate("screen");
+  // theater comes along for its timezone, so the price charged uses the same
+  // cinema-clock rules the seat page quoted.
+  const showtime = await Showtime.findById(showtimeId)
+    .populate("screen")
+    .populate("theater", "timezone");
   if (!showtime || !showtime.isActive) {
     throw new AppError("Showtime not found", 404, "NOT_FOUND");
   }
@@ -53,7 +63,11 @@ export const createCheckout = async (userId, showtimeId, seatIds) => {
     );
   }
 
-  const { amount, priceBreakdown } = await priceSelectedSeats(showtime, seatIds);
+  const { amount, priceBreakdown } = await priceSelectedSeats(
+    showtime,
+    seatIds,
+    showtime.theater?.timezone
+  );
 
   // Stripe amounts are in the smallest currency unit (paise for INR).
   // payment_method_types is pinned to "card" (rather than Stripe's automatic
@@ -77,7 +91,8 @@ export const createCheckout = async (userId, showtimeId, seatIds) => {
   const booking = await Booking.create({
     user: userId,
     showtime: showtime._id,
-    theater: showtime.theater,
+    // `.theater` is populated above (for its timezone), so take the id.
+    theater: showtime.theater?._id ?? showtime.theater,
     seatIds,
     amount,
     status: "pending",

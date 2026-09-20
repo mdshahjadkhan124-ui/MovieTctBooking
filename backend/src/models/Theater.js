@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { DEFAULT_TIMEZONE } from "../utils/timezone.js";
 
 const theaterSchema = new mongoose.Schema(
   {
@@ -7,7 +8,10 @@ const theaterSchema = new mongoose.Schema(
       address: { type: String, trim: true },
       city: { type: String, required: true, trim: true },
     },
-    owner: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    // IANA zone this venue's clock runs on. Prime-time/weekend pricing and
+    // "showtimes on date X" are answered in this zone, so they don't change
+    // meaning when the server does (local in dev, UTC on Render).
+    timezone: { type: String, trim: true, default: DEFAULT_TIMEZONE },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

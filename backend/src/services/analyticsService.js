@@ -1,5 +1,6 @@
 import { Booking } from "../models/Booking.js";
 import { Showtime } from "../models/Showtime.js";
+import { DEFAULT_TIMEZONE } from "../utils/timezone.js";
 
 const TOP_MOVIES_LIMIT = 5;
 
@@ -43,10 +44,12 @@ const topMoviesPipeline = (theaterId) => [
 
 // Hour-of-day a booking was MADE (not the showtime's start time) — the
 // business question is "when do customers book," not "which slots are
-// popular" (that's occupancy/theaterPerformance's job instead).
+// popular" (that's occupancy/theaterPerformance's job instead). Bucketed in
+// the app's timezone, not $hour's UTC default, so "9pm" on the chart is the
+// 9pm customers actually experienced.
 const peakBookingTimesPipeline = (theaterId) => [
   { $match: { status: "confirmed", ...(theaterId && { theater: theaterId }) } },
-  { $group: { _id: { $hour: "$createdAt" }, count: { $sum: 1 } } },
+  { $group: { _id: { $hour: { date: "$createdAt", timezone: DEFAULT_TIMEZONE } }, count: { $sum: 1 } } },
   { $project: { _id: 0, hour: "$_id", count: 1 } },
 ];
 

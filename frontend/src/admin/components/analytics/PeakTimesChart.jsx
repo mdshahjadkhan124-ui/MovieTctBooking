@@ -10,7 +10,7 @@ const PeakTimesChart = ({ peakBookingTimes }) => {
   return (
     <ChartCard
       title="Peak Booking Times"
-      subtitle="Confirmed bookings by hour of day (UTC)"
+      subtitle="Confirmed bookings by hour of day (IST)"
       isEmpty={!hasData}
     >
       <ResponsiveContainer width="100%" height={240}>

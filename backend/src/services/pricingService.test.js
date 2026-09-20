@@ -3,19 +3,25 @@ import { calculateSeatPrice } from "./pricingService.js";
 
 const BASE_PRICE = 200;
 
+// All fixtures carry an explicit +05:30 offset: pricing reads the clock in
+// the THEATER's timezone (Asia/Kolkata by default), so these must pin real
+// instants rather than "whatever this wall-clock string means on the machine
+// running the suite" — otherwise the same test would pass in IST and fail on
+// a UTC CI box.
+//
 // A weekday (Wed 2025-01-15), off-peak-neutral 3pm slot — deliberately
 // outside both "prime time" (6-10pm) and "matinee" (<12pm) so the time
 // multiplier is a neutral 1.0 and doesn't interfere with the factor under
 // test in tests that aren't specifically about time.
-const NEUTRAL_STANDARD_TIME = "2025-01-15T15:00:00";
+const NEUTRAL_STANDARD_TIME = "2025-01-15T15:00:00+05:30";
 // A weekday prime-time slot (7pm).
-const WEEKDAY_PRIME_TIME = "2025-01-15T19:00:00";
+const WEEKDAY_PRIME_TIME = "2025-01-15T19:00:00+05:30";
 // A weekend, but outside prime-time hours (11am Saturday) — still prime
 // per the spec ("weekend OR prime-time"), used to confirm weekend alone
 // triggers the surge regardless of hour.
-const WEEKEND_OFF_HOURS = "2025-01-18T11:00:00";
+const WEEKEND_OFF_HOURS = "2025-01-18T11:00:00+05:30";
 // A weekday matinee (10am).
-const WEEKDAY_MATINEE = "2025-01-15T10:00:00";
+const WEEKDAY_MATINEE = "2025-01-15T10:00:00+05:30";
 
 const makeShowtime = (startTime, columns = 12) => ({
   startTime,
@@ -135,7 +141,7 @@ describe("calculateSeatPrice", () => {
     const { finalPrice, breakdown } = calculateSeatPrice(
       199, // deliberately not round, to exercise the rounding step
       premiumWeekendSeat,
-      makeShowtime("2025-01-18T20:00:00"), // Saturday, 8pm
+      makeShowtime("2025-01-18T20:00:00+05:30"), // Saturday, 8pm IST
       0.95
     );
 

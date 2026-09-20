@@ -22,13 +22,14 @@ const theaterAdminFor = (theaterId) => ({ role: "theater_admin", theater: theate
 beforeAll(async () => {
   await connectDB();
 
-  // This is a shared dev database, not an isolated test DB — earlier
-  // sprints' real bookings are still in it. A super_admin's view is
-  // deliberately global/unscoped, so its tests below compare against this
-  // pre-fixture baseline (delta, not an exact total) rather than assuming
-  // an empty collection. The theater_admin tests don't need this: they're
-  // scoped to theater ids that only exist in this file, so nothing else in
-  // the shared DB can leak into them.
+  // The in-memory MongoDB (vitest.global-setup.js) is isolated from the real
+  // dev database, but it is shared by every test file in the run — other
+  // files' bookings can already be in it when this runs. A super_admin's
+  // view is deliberately global/unscoped, so its tests below compare against
+  // this pre-fixture baseline (delta, not an exact total) rather than
+  // assuming an empty collection. The theater_admin tests don't need this:
+  // they're scoped to theater ids that only exist in this file, so nothing
+  // else in the shared test DB can leak into them.
   baseline = await analyticsService.getAnalytics(superAdmin);
 
   movie1 = await Movie.create({ title: "Analytics Movie 1", durationMinutes: 100 });
@@ -153,28 +154,27 @@ describe("analyticsService (theater_admin — scoped view, tightly isolated by d
 });
 
 describe("analyticsService: peak booking times", () => {
-  it("groups confirmed bookings by hour-of-day they were made (UTC, matching $hour's default), zero-filling empty hours", async () => {
+  it("groups confirmed bookings by hour-of-day they were made, in the app's timezone, zero-filling empty hours", async () => {
     const bookings = await Booking.create([
       { user: userId, showtime: showtime4._id, theater: theater3._id, seatIds: ["A1"], amount: 100, status: "confirmed" },
       { user: userId, showtime: showtime4._id, theater: theater3._id, seatIds: ["A2"], amount: 100, status: "confirmed" },
       { user: userId, showtime: showtime4._id, theater: theater3._id, seatIds: ["B1"], amount: 100, status: "confirmed" },
     ]);
 
-    // Force distinct, known UTC hours (setUTCHours, not setHours — $hour
-    // operates on UTC by default regardless of the server's local timezone)
-    // so this assertion never depends on wherever the suite happens to run.
+    // Pin each booking to a known wall-clock hour in the app's timezone
+    // (explicit +05:30), which is the bucket the pipeline now groups by — so
+    // this assertion never depends on wherever the suite happens to run.
     // Goes through the native driver (Booking.collection, not Booking.
     // updateOne) because Mongoose's timestamps plugin otherwise treats
     // createdAt as set-once and silently drops it from a $set update.
-    const setUtcHour = (id, hour) => {
-      const d = new Date();
-      d.setUTCHours(hour, 0, 0, 0);
+    const setIstHour = (id, hour) => {
+      const d = new Date(`2025-06-15T${String(hour).padStart(2, "0")}:00:00+05:30`);
       return Booking.collection.updateOne({ _id: id }, { $set: { createdAt: d } });
     };
     await Promise.all([
-      setUtcHour(bookings[0]._id, 9),
-      setUtcHour(bookings[1]._id, 9),
-      setUtcHour(bookings[2]._id, 21),
+      setIstHour(bookings[0]._id, 9),
+      setIstHour(bookings[1]._id, 9),
+      setIstHour(bookings[2]._id, 21),
     ]);
 
     const { peakBookingTimes } = await analyticsService.getAnalytics(theaterAdminFor(theater3._id));

@@ -6,23 +6,17 @@ import {
   useUpdateTheaterMutation,
 } from "../../api/adminTheatersApi.js";
 
-const EMPTY_FORM = { name: "", address: "", city: "", owner: "" };
+const EMPTY_FORM = { name: "", address: "", city: "" };
 
 const toFormState = (theater) => ({
   name: theater.name ?? "",
   address: theater.location?.address ?? "",
   city: theater.location?.city ?? "",
-  owner: theater.owner ?? "",
 });
-
-const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
 
 const validate = (form) => {
   if (!form.name.trim()) return "Name is required";
   if (!form.city.trim()) return "City is required";
-  if (form.owner && !OBJECT_ID_RE.test(form.owner.trim())) {
-    return "Owner must be a valid user id (24-character hex string)";
-  }
   return "";
 };
 
@@ -32,7 +26,6 @@ const toPayload = (form) => {
     location: { city: form.city.trim() },
   };
   if (form.address) payload.location.address = form.address.trim();
-  if (form.owner) payload.owner = form.owner.trim();
   return payload;
 };
 
@@ -124,16 +117,8 @@ const AdminTheaterFormPage = () => {
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm">
-          Owner (theater_admin user id)
-          <input
-            type="text"
-            value={form.owner}
-            onChange={handleChange("owner")}
-            placeholder="Leave blank if unassigned"
-            className="rounded-md border border-gray-300 px-3 py-2 font-mono text-xs outline-none focus:border-primary"
-          />
-        </label>
+        {/* Who manages this theater isn't set here: a super_admin assigns it
+            when creating the theater_admin account (Users page). */}
 
         {formError && <p className="text-sm text-red-600">{formError}</p>}
         {success && <p className="text-sm text-green-600">Saved!</p>}

@@ -64,7 +64,7 @@ const AdminTheatersPage = () => {
               <tr>
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">City</th>
-                <th className="px-4 py-3">Owner</th>
+                <th className="px-4 py-3">Timezone</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
@@ -74,9 +74,9 @@ const AdminTheatersPage = () => {
                 <tr key={theater._id}>
                   <td className="px-4 py-3 font-medium text-gray-900">{theater.name}</td>
                   <td className="px-4 py-3 text-gray-600">{theater.location?.city}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-500">
-                    {theater.owner ?? "Unassigned"}
-                  </td>
+                  {/* Drives prime-time/weekend pricing for this venue's
+                      showtimes — see backend pricingService. */}
+                  <td className="px-4 py-3 text-xs text-gray-500">{theater.timezone ?? "—"}</td>
                   <td className="px-4 py-3">
                     <span
                       className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
