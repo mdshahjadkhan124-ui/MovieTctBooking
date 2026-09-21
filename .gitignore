@@ -1,5 +1,9 @@
 node_modules/
 .env
+# Per-environment env files (.env.development, .env.local, …) carry real
+# credentials too — ignore them all, but keep the committed template.
+.env.*
+!.env.example
 .DS_Store
 dist/
 build/
