@@ -181,30 +181,44 @@ export const lockSeats = async (showtimeId, seatIds, userId) => {
     throw new AppError("Showtime not found", 404, "NOT_FOUND");
   }
 
-  // Reject bogus/typo'd seat ids, ones the layout itself marks unavailable,
-  // ones locked by someone ELSE, or ones already confirmed-booked — Redis
-  // locking is only meaningful for genuinely free, real seats. Seats the
-  // caller already holds stay allowed, so retrying checkout (e.g. after a
-  // declined card) re-acquires them instead of failing against the caller's
-  // own lock. (acquireLocks' atomic script is what actually prevents two
-  // users locking one seat; this upfront check additionally catches the
-  // confirmed-booking case, which Redis has no record of once that
-  // booking's lock was released.)
-  const [bookedSeatIds, lockedByOthers] = await Promise.all([
-    getConfirmedBookedSeatIds(showtimeId),
-    seatLockService.getSeatIdsLockedByOthers(showtimeId, userId),
-  ]);
-  const grid = buildSeatGrid(showtime.screen.layout, new Set([...bookedSeatIds, ...lockedByOthers]));
-  const validSeatIds = new Set(
-    grid.flat().filter((seat) => seat.status === "available").map((seat) => seat.id)
+  // Two different failures, deliberately kept apart because they mean
+  // different things to the caller:
+  //
+  //  1. INVALID — a typo'd seat id, or one the layout itself disables. That
+  //     is bad input and will never succeed on retry: 400 INVALID_SEATS.
+  //  2. TAKEN — a real seat that someone ELSE holds or has already booked.
+  //     That is a conflict, not bad input — it may even free up again — so
+  //     it goes down the same 409 SEATS_UNAVAILABLE path as a race lost
+  //     inside acquireLocks, and the client sees one shape for "someone got
+  //     there first" whichever check caught it.
+  //
+  // Seats the caller already holds count as neither, so retrying checkout
+  // (e.g. after a declined card) re-acquires them instead of failing
+  // against the caller's own lock. (acquireLocks' atomic script is what
+  // actually prevents two users locking one seat; this upfront check
+  // additionally catches the confirmed-booking case, which Redis has no
+  // record of once that booking's lock was released.)
+  const layoutGrid = buildSeatGrid(showtime.screen.layout);
+  const realSeatIds = new Set(
+    layoutGrid.flat().filter((seat) => seat.status === "available").map((seat) => seat.id)
   );
-  const invalidSeatIds = seatIds.filter((id) => !validSeatIds.has(id));
+  const invalidSeatIds = seatIds.filter((id) => !realSeatIds.has(id));
   if (invalidSeatIds.length > 0) {
     throw new AppError(
       `Invalid or unavailable seat(s): ${invalidSeatIds.join(", ")}`,
       400,
       "INVALID_SEATS"
     );
+  }
+
+  const [bookedSeatIds, lockedByOthers] = await Promise.all([
+    getConfirmedBookedSeatIds(showtimeId),
+    seatLockService.getSeatIdsLockedByOthers(showtimeId, userId),
+  ]);
+  const takenSeatIds = new Set([...bookedSeatIds, ...lockedByOthers]);
+  const unavailable = seatIds.filter((id) => takenSeatIds.has(id));
+  if (unavailable.length > 0) {
+    return { success: false, unavailable };
   }
 
   const result = await seatLockService.acquireLocks(showtimeId, seatIds, userId);

@@ -119,10 +119,13 @@ describe("showtimeService.lockSeats", () => {
     const heldByA = await showtimeService.lockSeats(id, ["A3"], userA);
     expect(heldByA.success).toBe(true);
 
-    await expect(showtimeService.lockSeats(id, ["A3"], userB)).rejects.toMatchObject({
-      statusCode: 400,
-      code: "INVALID_SEATS",
-    });
+    // A conflict, not invalid input: it goes down the same success:false
+    // path the controller turns into 409 SEATS_UNAVAILABLE, naming exactly
+    // which seat was taken. (This used to be a 400 INVALID_SEATS, which told
+    // the user they had made a mistake when someone had simply got there
+    // first.)
+    const attempt = await showtimeService.lockSeats(id, ["A3"], userB);
+    expect(attempt).toEqual({ success: false, unavailable: ["A3"] });
   });
 
   it("never treats a confirmed-booked seat as re-lockable, even for the user who booked it", async () => {
@@ -136,7 +139,27 @@ describe("showtimeService.lockSeats", () => {
       status: "confirmed",
     });
 
-    await expect(showtimeService.lockSeats(id, ["B1"], userA)).rejects.toMatchObject({
+    // Already booked is a conflict too — 409 path, not 400.
+    const attempt = await showtimeService.lockSeats(id, ["B1"], userA);
+    expect(attempt).toEqual({ success: false, unavailable: ["B1"] });
+  });
+
+  // The split must not loosen the invalid-seat check: a seat that doesn't
+  // exist is still bad input, and still a 400.
+  it("still rejects a seat id that doesn't exist as invalid input (400 INVALID_SEATS)", async () => {
+    const id = showtime._id.toString();
+
+    await expect(showtimeService.lockSeats(id, ["Z99"], userA)).rejects.toMatchObject({
+      statusCode: 400,
+      code: "INVALID_SEATS",
+    });
+  });
+
+  it("reports invalid input ahead of a conflict when a request has both", async () => {
+    const id = showtime._id.toString();
+    // A3 is held by userA (above); Z99 doesn't exist. The request is
+    // malformed regardless of who holds A3, so the 400 wins.
+    await expect(showtimeService.lockSeats(id, ["Z99", "A3"], userB)).rejects.toMatchObject({
       statusCode: 400,
       code: "INVALID_SEATS",
     });
@@ -215,6 +238,66 @@ describe("showtimeService.getShowtimeRecommendation", () => {
     for (const seatId of recommendation.seats) {
       expect(unavailable.has(seatId)).toBe(false);
     }
+  });
+});
+
+describe("POST /lock over HTTP returns 409 for contention, not 400 (regression)", () => {
+  it("a seat taken by another user comes back as 409 SEATS_UNAVAILABLE, not 400", async () => {
+    // Its own showtime, so it can't collide with locks left by other tests
+    // in this file sharing the fixture showtime above.
+    const contentionShowtime = await Showtime.create({
+      movie: movie._id,
+      screen: screen._id,
+      theater: theater._id,
+      startTime: new Date(Date.now() + 72 * 60 * 60 * 1000),
+      price: 200,
+      format: "2D",
+    });
+    const email = `contention-${runId}@example.com`;
+    const otherUser = await User.create({ name: "Contention Tester", email, password: "password123" });
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
+      body: JSON.stringify({ email, password: "password123" }),
+    });
+    const otherCookie = loginRes.headers.get("set-cookie").split(";")[0];
+
+    const first = await fetch(`${baseUrl}/api/showtimes/${contentionShowtime._id}/lock`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        Cookie: authCookie,
+      },
+      body: JSON.stringify({ seatIds: ["A1"] }),
+    });
+    expect(first.status).toBe(200);
+
+    const second = await fetch(`${baseUrl}/api/showtimes/${contentionShowtime._id}/lock`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        Cookie: otherCookie,
+      },
+      body: JSON.stringify({ seatIds: ["A1"] }),
+    });
+    const body = await second.json();
+
+    expect(second.status).toBe(409);
+    expect(body.error.code).toBe("SEATS_UNAVAILABLE");
+    expect(body.error.unavailable).toEqual(["A1"]);
+
+    // SeatSelectionPage.runCheckout special-cases status 409 to tell the
+    // user someone else just took the seat, rather than the generic
+    // "could not start checkout" — this is the branch that regressed.
+
+    await User.deleteOne({ _id: otherUser._id });
+    await Showtime.deleteOne({ _id: contentionShowtime._id });
+    for await (const keys of redisClient.scanIterator({ MATCH: `lock:${contentionShowtime._id}:*` })) {
+      for (const key of keys) await redisClient.del(key);
+    }
+    await redisClient.del(`locks:${contentionShowtime._id}`);
   });
 });
 
