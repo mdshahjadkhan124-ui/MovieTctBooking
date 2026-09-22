@@ -18,6 +18,7 @@ const UNIT_TEST_FILES = [
   "src/utils/buildSeatGrid.parity.test.js",
   "src/utils/timezone.test.js",
   "src/utils/pagination.test.js",
+  "src/seed/bootstrapCityMap.test.js",
 ];
 
 export default defineConfig({

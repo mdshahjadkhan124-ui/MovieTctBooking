@@ -7,6 +7,7 @@ import { Screen } from "../models/Screen.js";
 import { Showtime } from "../models/Showtime.js";
 import * as showtimeService from "../services/showtimeService.js";
 import { getMovieForSeed } from "../services/tmdbService.js";
+import { bootstrapEveryMovieInEveryCity } from "./bootstrapCityMap.js";
 
 // Old static demo titles being replaced by real TMDB data. Movies with real
 // bookings against them are deactivated instead of deleted (see below) —
@@ -317,7 +318,13 @@ const run = async () => {
   // computeMovieCityRelevance's own comment for why the ordering matters.
   const movieCityMap = await computeMovieCityRelevance();
   const { theaterDocs, screenDocs } = await seedTheatersAndScreens();
-  await seedShowtimesForMovies(movieDocs, theaterDocs, screenDocs, movieCityMap);
+  // An empty map means no showtimes existed to infer relevance from, i.e. a
+  // fresh database — fall back to seeding everything rather than nothing.
+  const effectiveCityMap =
+    movieCityMap.size > 0
+      ? movieCityMap
+      : bootstrapEveryMovieInEveryCity(movieDocs, theaterDocs);
+  await seedShowtimesForMovies(movieDocs, theaterDocs, screenDocs, effectiveCityMap);
 
   console.log("Catalog seed complete.");
   await mongoose.disconnect();
