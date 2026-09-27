@@ -39,6 +39,22 @@ const userSchema = new mongoose.Schema(
         return this.role === "theater_admin";
       },
     },
+    // Marks one of the 5 synthetic accounts seed:analytics-demo's own
+    // ensureDemoUsers() creates directly via User.create()/save() — never
+    // set anywhere else. Both user-creation paths (public signup and
+    // createElevatedUser) destructure the client-supplied body down to an
+    // explicit field list — twice, once in the controller and again in the
+    // service — before ever calling User.create(), so a client can never
+    // smuggle this in; there's no field to strip, because it's never read
+    // from the request in the first place. seed:refresh trusts this,
+    // instead of the demo accounts' email pattern, to decide whether a
+    // booking is safe to roll forward with its showtime: an email domain
+    // isn't reserved anywhere, so nothing stops a real signup from using
+    // one of those exact addresses.
+    isSeedDemo: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );

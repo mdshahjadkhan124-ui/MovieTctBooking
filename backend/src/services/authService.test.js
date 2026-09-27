@@ -15,7 +15,38 @@ beforeAll(async () => {
   });
 });
 
+describe("signup", () => {
+  it("ignores a client-supplied isSeedDemo — not a field this path can set", async () => {
+    // toSafeUser's return shape doesn't include isSeedDemo either way, so
+    // the check reads the actual persisted document rather than the
+    // service's return value — this needs to prove what got written, not
+    // just what got echoed back.
+    await authService.signup({
+      name: "Would-Be Demo User",
+      email: "spoofed-demo.authtest@example.com",
+      password: "password123",
+      isSeedDemo: true,
+    });
+
+    const persisted = await User.findOne({ email: "spoofed-demo.authtest@example.com" });
+    expect(persisted.isSeedDemo).toBe(false);
+  });
+});
+
 describe("createElevatedUser", () => {
+  it("ignores a client-supplied isSeedDemo — not a field this path can set either", async () => {
+    await authService.createElevatedUser({
+      name: "Would-Be Demo Admin",
+      email: "spoofed-demo-admin.authtest@example.com",
+      password: "password123",
+      theater: theater._id,
+      isSeedDemo: true,
+    });
+
+    const persisted = await User.findOne({ email: "spoofed-demo-admin.authtest@example.com" });
+    expect(persisted.isSeedDemo).toBe(false);
+  });
+
   it("creates a theater_admin scoped to the given theater", async () => {
     const user = await authService.createElevatedUser({
       name: "Theater Manager",

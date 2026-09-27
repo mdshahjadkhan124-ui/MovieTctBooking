@@ -29,7 +29,26 @@ const ensureDemoUsers = async () => {
     const email = `demo-analytics-viewer-${i}@seed.local`;
     let user = await User.findOne({ email });
     if (!user) {
-      user = await User.create({ name: `Demo Viewer ${i}`, email, password: "DemoPass123!" });
+      user = await User.create({
+        name: `Demo Viewer ${i}`,
+        email,
+        password: "DemoPass123!",
+        isSeedDemo: true,
+      });
+    } else if (!user.isSeedDemo) {
+      // Backfills an account this script created before isSeedDemo existed,
+      // so seed:refresh's demo-only-showtime check (which trusts this field,
+      // not the email) still recognizes it on the next run. NOTE: this
+      // find-or-create is keyed on email alone, which is not reserved
+      // anywhere — if a real visitor had already signed up with this exact
+      // address before this script ever ran, this reuses (and now flags)
+      // their account rather than creating a fresh one. That's a
+      // pre-existing gap in this find-or-create, not something introduced
+      // or fixed here; isSeedDemo becoming the boundary going forward
+      // doesn't change it, since it can only mark an account this script
+      // already decided to treat as its own.
+      user.isSeedDemo = true;
+      await user.save();
     }
     users.push(user);
   }
