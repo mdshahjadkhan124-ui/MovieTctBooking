@@ -11,6 +11,7 @@ import { defineConfig } from "vitest/config";
 // against the real thing.
 const UNIT_TEST_FILES = [
   "src/services/seatRecommendation.test.js",
+  "src/services/seatRecommendation.contract.test.js",
   "src/services/pricingService.test.js",
   "src/services/refundPolicyService.test.js",
   "src/services/refundPolicy.parity.test.js",
