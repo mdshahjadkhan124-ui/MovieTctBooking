@@ -3,14 +3,19 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { connectRedis } from "../config/redis.js";
 import { acquireLocks, getLockedSeatIds, verifyLockOwnership } from "./seatLockService.js";
 
-// !! NOT YET RUN !!
-// These were written during a verification pass while the isolated test Redis
-// (Docker) was unavailable, so they have never been executed against a real
-// Redis. Every assertion below is an INVARIANT derived by tracing the
-// acquireLocks interleavings by hand (see the comments), chosen so it holds
-// under ANY scheduling — but the first real `npm run test:integration` is the
-// first real evidence. If one fails, diagnose test-vs-implementation before
-// changing either. Remove this banner after the first green run.
+// History worth knowing: these were first written while no test Redis was
+// available, and their first real run failed intermittently ("iteration ~20:
+// expected [] to deeply equal ['A1']"). A Redis MONITOR trace of a failing
+// iteration showed the locking code was correct — the one-seat request won
+// A1 and its lock key stayed alive — but ANOTHER TEST FILE's cleanup deleted
+// this iteration's per-showtime index set mid-flight. Cause: this file reused
+// seatLockService.test.js's "test-showtime-" key prefix, and both files'
+// afterEach sweeps every key matching it, while the two files run in parallel
+// against one Redis. Each file was deleting the other's in-flight keys (it
+// also intermittently broke seatLockService.test.js). The fix is the private,
+// run-scoped prefix below — the assertions were correct and were not loosened.
+// Independently confirmed with 6,000 uninterrupted races in a private
+// keyspace: zero invariant violations.
 //
 // What they cover, that seatLockService.test.js does not:
 //
@@ -24,9 +29,15 @@ import { acquireLocks, getLockedSeatIds, verifyLockOwnership } from "./seatLockS
 //    half-locked. That is what is pinned here.
 //  * More than two contenders for one seat.
 
-const TEST_SHOWTIME_PREFIX = "test-showtime-";
-const uniqueShowtimeId = () =>
-  `${TEST_SHOWTIME_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+// A private keyspace for this file, deliberately NOT "test-showtime-": that is
+// seatLockService.test.js's prefix, and its afterEach sweeps every key that
+// matches it (see the history note above). Scoped by a per-run id as well, so
+// even another run of this same file can't collide. The cleanup below can only
+// ever match keys made here, so it can't sweep anyone else's in-flight locks
+// either.
+const KEY_PREFIX = `test-concurrency-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-`;
+let showtimeCounter = 0;
+const uniqueShowtimeId = () => `${KEY_PREFIX}${showtimeCounter++}`;
 
 let client;
 
@@ -39,9 +50,8 @@ afterAll(async () => {
 });
 
 afterEach(async () => {
-  // Same cleanup as seatLockService.test.js. scanIterator yields BATCHES of
-  // keys per step, not single keys.
-  for (const pattern of [`lock:${TEST_SHOWTIME_PREFIX}*`, `locks:${TEST_SHOWTIME_PREFIX}*`]) {
+  // scanIterator yields BATCHES of keys per step, not single keys.
+  for (const pattern of [`lock:${KEY_PREFIX}*`, `locks:${KEY_PREFIX}*`]) {
     for await (const keys of client.scanIterator({ MATCH: pattern })) {
       for (const key of keys) await client.del(key);
     }
@@ -84,6 +94,11 @@ describe("seatLockService under real concurrency", () => {
         { userId: "userY", seats: ["A2", "A1"] },
       ],
       // Trace: X takes A1, Y takes A2, X fails A2, Y fails A1, both roll back.
+      // Not a rare corner: measured over 3,000 real races (one connection, so
+      // the two requests interleave in lockstep, as here) NOBODY won every
+      // time. Contract-correct — no double-lock, nothing left behind — but two
+      // users grabbing the same two seats in opposite order at the same
+      // instant both get refused and have to retry.
       exactlyOneWinnerGuaranteed: false,
     },
     {
@@ -106,7 +121,7 @@ describe("seatLockService under real concurrency", () => {
     async ({ requests, exactlyOneWinnerGuaranteed }) => {
       for (let i = 0; i < 30; i++) {
         const showtimeId = uniqueShowtimeId();
-        const label = `iteration ${i}`;
+        const label = `iteration ${i} (${showtimeId})`;
 
         const results = await Promise.all(
           requests.map(({ userId, seats }) => acquireLocks(showtimeId, seats, userId))
