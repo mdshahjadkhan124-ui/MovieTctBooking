@@ -45,6 +45,14 @@ const makeShowtime = (screen, hoursFromNow = 24) =>
 
 beforeAll(async () => {
   await connectDB();
+  // "Rejects a duplicate active entry" only means anything once the partial
+  // unique index exists, and Mongoose builds it in the background after
+  // connect — not before the first test. Alone that build always wins the
+  // race; beside another file that is creating dozens of collections and
+  // indexes on the same mongod it did not (two "waiting" rows for one
+  // user+showtime got in). Waiting for the build makes the test's premise true
+  // instead of usually true.
+  await WaitlistEntry.init();
   redisClient = await connectRedis();
 
   server = http.createServer(app);
