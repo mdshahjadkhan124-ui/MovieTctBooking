@@ -2,6 +2,7 @@ import { Suspense, lazy } from "react";
 import { Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import HomePage from "./pages/HomePage.jsx";
 
 // Everything below is lazy-loaded: the home page is the one route almost
@@ -45,43 +46,83 @@ const RouteFallback = () => (
   </div>
 );
 
+// Every route element (lazy or not — Suspense around a component that never
+// actually suspends is a harmless no-op) gets its own boundary pair, rather
+// than one shared at the top. That's what makes "one page crashing" a local
+// failure instead of a global one: the boundary sits INSIDE Layout/
+// AdminLayout's <Outlet />, so a crash there is caught before it reaches —
+// and unmounts — the Navbar/Footer or admin sidebar/header around it.
+const withRouteBoundary = (element) => (
+  <ErrorBoundary>
+    <Suspense fallback={<RouteFallback />}>{element}</Suspense>
+  </ErrorBoundary>
+);
+
 const App = () => {
   return (
-    <Suspense fallback={<RouteFallback />}>
+    // The last line of defense: anything above a per-route boundary (Layout,
+    // ProtectedRoute, AdminRoute/AdminLayout's own guard logic itself, not
+    // just the pages they render) is still caught here rather than
+    // whiting out the whole page with no fallback at all.
+    <ErrorBoundary>
       <Routes>
         <Route element={<Layout />}>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/movies/:id" element={<MovieDetailPage />} />
-          <Route path="/showtimes/:id/seats" element={<SeatSelectionPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/" element={withRouteBoundary(<HomePage />)} />
+          <Route path="/movies/:id" element={withRouteBoundary(<MovieDetailPage />)} />
+          <Route
+            path="/showtimes/:id/seats"
+            element={withRouteBoundary(<SeatSelectionPage />)}
+          />
+          <Route path="/login" element={withRouteBoundary(<LoginPage />)} />
+          <Route path="/signup" element={withRouteBoundary(<SignupPage />)} />
           <Route element={<ProtectedRoute />}>
-            <Route path="/bookings" element={<MyBookingsPage />} />
-            <Route path="/bookings/:id/ticket" element={<ETicketPage />} />
+            <Route path="/bookings" element={withRouteBoundary(<MyBookingsPage />)} />
+            <Route
+              path="/bookings/:id/ticket"
+              element={withRouteBoundary(<ETicketPage />)}
+            />
           </Route>
         </Route>
 
-        <Route path="/admin" element={<AdminRoute />}>
-          <Route element={<AdminLayout />}>
-            <Route index element={<AdminIndexRedirect />} />
-            <Route path="movies" element={<AdminMoviesPage />} />
-            <Route path="movies/new" element={<AdminMovieFormPage />} />
-            <Route path="movies/:id/edit" element={<AdminMovieFormPage />} />
-            <Route path="theaters" element={<AdminTheatersPage />} />
-            <Route path="theaters/new" element={<AdminTheaterFormPage />} />
-            <Route path="theaters/:id/edit" element={<AdminTheaterFormPage />} />
-            <Route path="screens" element={<AdminScreensPage />} />
-            <Route path="screens/new" element={<AdminScreenFormPage />} />
-            <Route path="screens/:id/edit" element={<AdminScreenFormPage />} />
-            <Route path="showtimes" element={<AdminShowtimesPage />} />
-            <Route path="showtimes/new" element={<AdminShowtimeFormPage />} />
-            <Route path="showtimes/:id/edit" element={<AdminShowtimeFormPage />} />
-            <Route path="analytics" element={<AdminAnalyticsPage />} />
-            <Route path="users" element={<AdminUsersPage />} />
+        <Route path="/admin" element={withRouteBoundary(<AdminRoute />)}>
+          <Route element={withRouteBoundary(<AdminLayout />)}>
+            <Route index element={withRouteBoundary(<AdminIndexRedirect />)} />
+            <Route path="movies" element={withRouteBoundary(<AdminMoviesPage />)} />
+            <Route path="movies/new" element={withRouteBoundary(<AdminMovieFormPage />)} />
+            <Route
+              path="movies/:id/edit"
+              element={withRouteBoundary(<AdminMovieFormPage />)}
+            />
+            <Route path="theaters" element={withRouteBoundary(<AdminTheatersPage />)} />
+            <Route
+              path="theaters/new"
+              element={withRouteBoundary(<AdminTheaterFormPage />)}
+            />
+            <Route
+              path="theaters/:id/edit"
+              element={withRouteBoundary(<AdminTheaterFormPage />)}
+            />
+            <Route path="screens" element={withRouteBoundary(<AdminScreensPage />)} />
+            <Route path="screens/new" element={withRouteBoundary(<AdminScreenFormPage />)} />
+            <Route
+              path="screens/:id/edit"
+              element={withRouteBoundary(<AdminScreenFormPage />)}
+            />
+            <Route path="showtimes" element={withRouteBoundary(<AdminShowtimesPage />)} />
+            <Route
+              path="showtimes/new"
+              element={withRouteBoundary(<AdminShowtimeFormPage />)}
+            />
+            <Route
+              path="showtimes/:id/edit"
+              element={withRouteBoundary(<AdminShowtimeFormPage />)}
+            />
+            <Route path="analytics" element={withRouteBoundary(<AdminAnalyticsPage />)} />
+            <Route path="users" element={withRouteBoundary(<AdminUsersPage />)} />
           </Route>
         </Route>
       </Routes>
-    </Suspense>
+    </ErrorBoundary>
   );
 };
 
