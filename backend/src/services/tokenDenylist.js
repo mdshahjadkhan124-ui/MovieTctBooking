@@ -11,6 +11,27 @@ import { AppError } from "../utils/AppError.js";
 const key = (jti) => `denylist:jwt:${jti}`;
 
 /**
+ * Both denylist operations fail CLOSED on a Redis error: revokeToken (logout)
+ * and isTokenRevoked (every authenticated request, via middleware/auth.js's
+ * `protect`) are the two halves of one authentication decision — did THIS
+ * session get revoked — and losing either one open would let a logged-out
+ * or compromised session keep acting as its owner. 503, not the central
+ * error handler's generic 500 fallback, so the client sees "try again",
+ * not "something is broken". Deliberately the opposite choice from
+ * rateLimiters.js's store-error handling, which fails OPEN: a request-count
+ * throttle failing open for a bit is a much smaller, non-account-specific
+ * risk than an authentication check failing open ever is.
+ */
+const failClosedOnRedisError = async (fn, context) => {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`Redis error ${context}:`, err);
+    throw new AppError("Service temporarily unavailable", 503, "SERVICE_UNAVAILABLE");
+  }
+};
+
+/**
  * Revokes the token in a cookie value. Returns whether anything was
  * actually revoked — a malformed/expired token, or one issued before tokens
  * carried an id, has nothing to revoke.
@@ -28,33 +49,19 @@ export const revokeToken = async (token) => {
   const remainingMs = payload.exp * 1000 - Date.now();
   if (!payload.jti || remainingMs <= 0) return false;
 
-  await getRedisClient().set(key(payload.jti), "1", { PX: Math.ceil(remainingMs) });
+  await failClosedOnRedisError(
+    () => getRedisClient().set(key(payload.jti), "1", { PX: Math.ceil(remainingMs) }),
+    "while revoking a token"
+  );
   return true;
 };
 
-/**
- * True if this token id was revoked (i.e. its owner logged out).
- *
- * Fails CLOSED: every authenticated request goes through this (see
- * middleware/auth.js's `protect`), so if Redis can't be reached we genuinely
- * don't know whether the token was revoked — defaulting to "not revoked"
- * would let a logged-out or compromised session straight through. Refusing
- * the request outright (503) is the safe failure mode; never assume false.
- * Without this catch, the raw Redis rejection would reach the central error
- * handler's generic 500 branch (errorHandler.js), which is still a refusal,
- * just with a less honest status code and no indication it's transient.
- */
+/** True if this token id was revoked (i.e. its owner logged out). */
 export const isTokenRevoked = async (jti) => {
   if (!jti) return false; // pre-denylist tokens: can't be revoked, only expire
 
-  try {
-    return (await getRedisClient().exists(key(jti))) === 1;
-  } catch (err) {
-    console.error("Redis error while checking token denylist:", err);
-    throw new AppError(
-      "Service temporarily unavailable",
-      503,
-      "SERVICE_UNAVAILABLE"
-    );
-  }
+  return failClosedOnRedisError(
+    async () => (await getRedisClient().exists(key(jti))) === 1,
+    "while checking the token denylist"
+  );
 };

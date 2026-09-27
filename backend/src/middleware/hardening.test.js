@@ -2,7 +2,7 @@ import "dotenv/config";
 import http from "node:http";
 import express from "express";
 import mongoose from "mongoose";
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { connectDB } from "../config/db.js";
 import { connectRedis } from "../config/redis.js";
 import app from "../app.js";
@@ -46,6 +46,29 @@ beforeAll(async () => {
   );
   testApp.use(createRateLimiter({ windowMs: 60_000, max: 3, prefix: `rl:test-limited:${testRunId}:` }));
   testApp.post("/limited", (req, res) => res.json({ ok: true }));
+
+  // A store that fails exactly the way a real one does mid-outage (see
+  // rateLimiters.js's own reasoning for why this fails open) — deterministic
+  // and isolated: it never touches the real Redis connection every other
+  // test in this file still needs working, and the failure fires on every
+  // single call rather than depending on real network timing.
+  const alwaysFailingStore = {
+    increment: async () => {
+      throw new Error("simulated Redis outage");
+    },
+    decrement: async () => {},
+    resetKey: async () => {},
+  };
+  testApp.post(
+    "/redis-down",
+    createRateLimiter({
+      windowMs: 60_000,
+      max: 1,
+      prefix: `rl:test-redis-down:${testRunId}:`,
+      store: alwaysFailingStore,
+    }),
+    (req, res) => res.json({ ok: true })
+  );
 
   testServer = http.createServer(testApp);
   await new Promise((resolve) => testServer.listen(0, resolve));
@@ -109,6 +132,28 @@ describe("Redis-backed rate limiting", () => {
       statuses.push(res.status);
     }
     expect(statuses.every((s) => s !== 429)).toBe(true);
+  });
+
+  it("fails OPEN when the store errors (Redis outage) — the request still succeeds, never 429/500/503, and it's logged loudly", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // max: 1 on this route — if it were failing anything other than fully
+    // open, request #2 would 429. Every single call hits the always-failing
+    // store, so this also proves it doesn't fail open only once and then
+    // fail closed on a retry.
+    const statuses = [];
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch(`${testBaseUrl}/redis-down`, { method: "POST" });
+      statuses.push(res.status);
+    }
+    expect(statuses).toEqual([200, 200, 200]);
+
+    expect(errorSpy).toHaveBeenCalled();
+    const logged = errorSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+    expect(logged).toContain("failing OPEN");
+    expect(logged).toContain(`rl:test-redis-down:${testRunId}:`);
+
+    errorSpy.mockRestore();
   });
 });
 
