@@ -1,15 +1,9 @@
 import { Booking } from "../models/Booking.js";
 import { Showtime } from "../models/Showtime.js";
 import { DEFAULT_TIMEZONE } from "../utils/timezone.js";
+import { resolveTheaterScope } from "../utils/assertTheaterAccess.js";
 
 const TOP_MOVIES_LIMIT = 5;
-
-// super_admin sees everything; a theater_admin is scoped to their own
-// theater at the QUERY level (folded into every pipeline's own $match/
-// $lookup below), never filtered after the fact in JS — so there's no path
-// where a theater_admin's response payload ever contains another theater's
-// documents to begin with.
-const theaterScopeFor = (user) => (user.role === "theater_admin" ? user.theater : null);
 
 const revenuePipeline = (theaterId) => [
   { $match: { ...(theaterId && { theater: theaterId }) } },
@@ -150,7 +144,10 @@ const getOccupancy = async (theaterId) => {
 };
 
 export const getAnalytics = async (user) => {
-  const theaterId = theaterScopeFor(user);
+  // Scoped at the QUERY level (folded into every pipeline's $match below),
+  // never filtered after the fact in JS — so a theater_admin's response
+  // payload never contains another theater's documents to begin with.
+  const theaterId = resolveTheaterScope(user);
 
   const [revenueResult, topMovies, occupancy, peakHourly, theaterPerformance] = await Promise.all([
     Booking.aggregate(revenuePipeline(theaterId)),

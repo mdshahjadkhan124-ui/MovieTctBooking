@@ -2,7 +2,7 @@ import { Screen } from "../models/Screen.js";
 import { Theater } from "../models/Theater.js";
 import { Showtime } from "../models/Showtime.js";
 import { AppError } from "../utils/AppError.js";
-import { assertTheaterAccess } from "../utils/assertTheaterAccess.js";
+import { assertTheaterAccess, resolveTheaterScope } from "../utils/assertTheaterAccess.js";
 
 export const createScreen = async (user, data) => {
   const theater = await Theater.findById(data.theater);
@@ -58,7 +58,8 @@ export const getScreenById = async (user, id) => {
 export const listScreens = async (user, filters = {}, { skip = 0, limit } = {}) => {
   const query = {};
   if (filters.theater) query.theater = filters.theater;
-  if (user.role === "theater_admin") query.theater = user.theater;
+  const scope = resolveTheaterScope(user);
+  if (scope) query.theater = scope;
 
   const [screens, total] = await Promise.all([
     Screen.find(query).skip(skip).limit(limit),

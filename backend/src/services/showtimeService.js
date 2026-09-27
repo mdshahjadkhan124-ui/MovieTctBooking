@@ -4,7 +4,7 @@ import { Showtime } from "../models/Showtime.js";
 import { Theater } from "../models/Theater.js";
 import { Booking } from "../models/Booking.js";
 import { AppError } from "../utils/AppError.js";
-import { assertTheaterAccess } from "../utils/assertTheaterAccess.js";
+import { assertTheaterAccess, resolveTheaterScope } from "../utils/assertTheaterAccess.js";
 import { buildSeatGrid } from "../utils/buildSeatGrid.js";
 import { recommendSeats } from "./seatRecommendation.js";
 import * as seatLockService from "./seatLockService.js";
@@ -144,7 +144,8 @@ export const listShowtimesAdmin = async (user, filters = {}, { skip = 0, limit }
   const query = {};
   if (filters.theater) query.theater = filters.theater;
   if (filters.movie) query.movie = filters.movie;
-  if (user.role === "theater_admin") query.theater = user.theater;
+  const scope = resolveTheaterScope(user);
+  if (scope) query.theater = scope;
 
   const [showtimes, total] = await Promise.all([
     Showtime.find(query).sort({ startTime: 1 }).skip(skip).limit(limit),
