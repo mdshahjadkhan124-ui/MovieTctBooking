@@ -17,10 +17,10 @@ const processWaitlistSafely = async (showtimeId) => {
 };
 
 export const listPublic = asyncHandler(async (req, res) => {
-  const { movie, city, date } = req.query;
+  const { movie, city, date, includePast } = req.query;
   const { page, limit, skip } = parsePagination(req.query);
   const { showtimes, total } = await showtimeService.listPublicShowtimes(
-    { movie, city, date },
+    { movie, city, date, includePast: includePast === "true" },
     { skip, limit }
   );
   res.json({

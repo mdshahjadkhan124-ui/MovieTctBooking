@@ -3,7 +3,7 @@ import { Showtime } from "../models/Showtime.js";
 import { AppError } from "../utils/AppError.js";
 import { stripe } from "../config/stripe.js";
 import * as seatLockService from "./seatLockService.js";
-import { getUnavailableSeatIds } from "./showtimeService.js";
+import { getUnavailableSeatIds, assertShowtimeNotStarted } from "./showtimeService.js";
 import { emitSeatsUpdated } from "../config/socket.js";
 import { buildSeatGrid } from "../utils/buildSeatGrid.js";
 import { calculateSeatPrice } from "./pricingService.js";
@@ -48,6 +48,7 @@ export const createCheckout = async (userId, showtimeId, seatIds) => {
   if (!showtime || !showtime.isActive) {
     throw new AppError("Showtime not found", 404, "NOT_FOUND");
   }
+  assertShowtimeNotStarted(showtime);
   if (typeof showtime.price !== "number" || showtime.price <= 0) {
     throw new AppError("This showtime has no price set", 400, "NO_PRICE");
   }

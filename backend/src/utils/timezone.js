@@ -80,3 +80,42 @@ export const zonedDayRange = (dateInput, timeZone = DEFAULT_TIMEZONE) => {
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
   return { start, end };
 };
+
+/**
+ * "YYYY-MM-DD" for the calendar day `date` falls on in timeZone — the
+ * theater's local today, not the server's. Used wherever "N days from now"
+ * has to mean N days from the cinema's own today (e.g. seedCatalog.js
+ * scheduling showtimes relative to "today"), not whatever day it happens to
+ * be on the machine running the process.
+ */
+export const zonedDateString = (date, timeZone = DEFAULT_TIMEZONE) => {
+  const { year, month, day } = partsIn(date, timeZone);
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * The UTC instant for a specific wall-clock hour on a given calendar day in a
+ * timezone — e.g. "19:00 in Asia/Kolkata on 2026-10-01" — so a scheduled slot
+ * lands at the same local wall-clock time no matter which timezone the
+ * calling process itself is running in. Builds on zonedDayRange's own
+ * midnight so both stay in sync (only India is used here, so a flat
+ * hour-in-ms offset from midnight never crosses a DST transition).
+ * @param {string} dateInput - "YYYY-MM-DD"
+ * @param {number} hour - 0-23, local hour in timeZone
+ */
+export const zonedDateTime = (dateInput, hour, timeZone = DEFAULT_TIMEZONE) => {
+  const { start } = zonedDayRange(dateInput, timeZone);
+  return new Date(start.getTime() + hour * 60 * 60 * 1000);
+};
+
+/**
+ * "YYYY-MM-DD" `days` calendar days after `dateString` — plain calendar
+ * arithmetic, done entirely in Y/M/D components (via Date.UTC, which never
+ * sees a real timezone) so it can't be shifted by DST or by whichever zone
+ * the process itself is in. Pairs with zonedDateString/zonedDateTime for
+ * "N days from the theater's local today" scheduling.
+ */
+export const addDaysToDateString = (dateString, days) => {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+};

@@ -12,6 +12,23 @@ import { emitSeatsUpdated } from "../config/socket.js";
 import { calculateSeatPrice } from "./pricingService.js";
 import { zonedDayRange } from "../utils/timezone.js";
 
+// Shared by lockSeats (here) and bookingService.createCheckout — a showtime
+// that has already started can never be locked or booked, since the
+// screening it refers to no longer exists to seat anyone into. 409, not 400:
+// this isn't bad input, it's the same "someone/something else got there
+// first" shape as a seat lost to contention (SEATS_UNAVAILABLE) or a lock
+// that expired out from under a caller (LOCKS_NOT_OWNED) — just lost to time
+// instead of another customer.
+export const assertShowtimeNotStarted = (showtime) => {
+  if (showtime.startTime <= new Date()) {
+    throw new AppError(
+      "This showtime has already started and can no longer be booked",
+      409,
+      "SHOWTIME_STARTED"
+    );
+  }
+};
+
 const getConfirmedBookedSeatIds = async (showtimeId) => {
   const bookings = await Booking.find({ showtime: showtimeId, status: "confirmed" }).select(
     "seatIds"
@@ -181,6 +198,7 @@ export const lockSeats = async (showtimeId, seatIds, userId) => {
   if (!showtime || !showtime.isActive) {
     throw new AppError("Showtime not found", 404, "NOT_FOUND");
   }
+  assertShowtimeNotStarted(showtime);
 
   // Two different failures, deliberately kept apart because they mean
   // different things to the caller:
@@ -293,6 +311,12 @@ export const listPublicShowtimes = async (filters = {}, { skip = 0, limit } = {}
     query.theater = { $in: theaterIds };
   }
 
+  // Public listings default to upcoming showtimes only — a customer should
+  // never see, or be able to book, a screening that has already started.
+  // includePast=true opts back in, for admin tooling that wants the full
+  // history rather than just what's still on sale.
+  const excludePast = !filters.includePast;
+
   if (filters.date) {
     // "Showtimes on the 19th" means the 19th where the cinema is. Computed
     // in the app's timezone rather than the server's, so the same query
@@ -300,7 +324,16 @@ export const listPublicShowtimes = async (filters = {}, { skip = 0, limit } = {}
     // Per-theater zones would need one range per zone; every venue here is
     // in one country, so the default zone is the honest simplification.
     const { start, end } = zonedDayRange(filters.date);
-    query.startTime = { $gte: start, $lt: end };
+    // A requested day that's already under way (e.g. "today") only offers
+    // its remaining showtimes by default, same as no date filter at all —
+    // the two floors are combined by taking whichever is later.
+    if (excludePast && start < new Date()) {
+      query.startTime = { $gt: new Date(), $lt: end };
+    } else {
+      query.startTime = { $gte: start, $lt: end };
+    }
+  } else if (excludePast) {
+    query.startTime = { $gt: new Date() };
   }
 
   const [showtimes, total] = await Promise.all([

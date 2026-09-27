@@ -209,6 +209,16 @@ describe("booking checkout + Stripe webhook", () => {
     expect(stillLocked).not.toContain("A2");
   }, 20000);
 
+  it("checkout on a showtime that has already started is rejected, no Stripe call made", async () => {
+    // Skip acquireLocks entirely: the not-started guard runs before lock
+    // ownership is even checked (see createCheckout), so an unlocked seat
+    // still proves the guard is what's actually stopping this, not a
+    // coincidental LOCKS_NOT_OWNED from never having locked anything.
+    await expect(
+      bookingService.createCheckout(userId, showtimeStarted._id.toString(), ["A9"])
+    ).rejects.toMatchObject({ statusCode: 409, code: "SHOWTIME_STARTED" });
+  });
+
   it("expired lock at webhook time -> booking failed + refund issued", async () => {
     const seatIds = ["B1", "B2"];
     // Acquire with the real TTL so the slow setup below (checkout + a real

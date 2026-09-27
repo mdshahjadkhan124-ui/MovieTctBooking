@@ -25,6 +25,7 @@ let movie;
 let theater;
 let screen;
 let showtime;
+let showtimeStarted;
 let user;
 let authCookie;
 
@@ -56,6 +57,14 @@ beforeAll(async () => {
     price: 200,
     format: "2D",
   });
+  showtimeStarted = await Showtime.create({
+    movie: movie._id,
+    screen: screen._id,
+    theater: theater._id,
+    startTime: new Date(Date.now() - 60 * 60 * 1000),
+    price: 200,
+    format: "2D",
+  });
 
   const email = `showtime-service-${runId}@example.com`;
   const password = "password123";
@@ -74,8 +83,8 @@ afterAll(async () => {
     for (const key of keys) await redisClient.del(key);
   }
   await redisClient.del(`locks:${showtime._id}`);
-  await Booking.deleteMany({ showtime: showtime._id });
-  await Showtime.deleteOne({ _id: showtime._id });
+  await Booking.deleteMany({ showtime: { $in: [showtime._id, showtimeStarted._id] } });
+  await Showtime.deleteMany({ _id: { $in: [showtime._id, showtimeStarted._id] } });
   await Screen.deleteOne({ _id: screen._id });
   await Theater.deleteOne({ _id: theater._id });
   await Movie.deleteOne({ _id: movie._id });
@@ -163,6 +172,70 @@ describe("showtimeService.lockSeats", () => {
       statusCode: 400,
       code: "INVALID_SEATS",
     });
+  });
+
+  it("rejects locking a seat on a showtime that has already started", async () => {
+    const id = showtimeStarted._id.toString();
+    // A1 is a real, unlocked seat in this showtime's own layout — proving
+    // the 409 comes from the not-started guard itself, not a coincidental
+    // 400 INVALID_SEATS from an unrelated bad seat id. The guard runs
+    // before the invalid-seat check, so this also pins that ordering.
+    await expect(showtimeService.lockSeats(id, ["A1"], userA)).rejects.toMatchObject({
+      statusCode: 409,
+      code: "SHOWTIME_STARTED",
+    });
+  });
+});
+
+describe("showtimeService.listPublicShowtimes: past showtimes excluded by default", () => {
+  // Scoped by this file's own movie rather than a bare/paginated listing —
+  // the Showtime collection is shared across every test file in the run
+  // (hundreds of documents by the time the whole suite has run), and
+  // GET /api/showtimes caps ?limit= at 100 (see utils/pagination.js), so an
+  // unscoped list can't reliably prove either inclusion or exclusion. This
+  // movie only has the two showtimes below anywhere in that shared DB.
+  it("excludes a showtime that has already started", async () => {
+    const { showtimes } = await showtimeService.listPublicShowtimes(
+      { movie: movie._id.toString() },
+      { limit: 50 }
+    );
+    const ids = showtimes.map((s) => s._id.toString());
+    expect(ids).toContain(showtime._id.toString());
+    expect(ids).not.toContain(showtimeStarted._id.toString());
+  });
+
+  it("includePast=true includes it", async () => {
+    const { showtimes } = await showtimeService.listPublicShowtimes(
+      { movie: movie._id.toString(), includePast: true },
+      { limit: 50 }
+    );
+    const ids = showtimes.map((s) => s._id.toString());
+    expect(ids).toContain(showtime._id.toString());
+    expect(ids).toContain(showtimeStarted._id.toString());
+  });
+});
+
+describe("GET /api/showtimes over HTTP: includePast query param", () => {
+  it("omits a started showtime by default, and includes it with includePast=true", async () => {
+    const withoutPast = await api(
+      `/api/showtimes?movie=${movie._id}&limit=50`,
+      { cookie: null }
+    );
+    expect(withoutPast.status).toBe(200);
+    const withoutBody = await withoutPast.json();
+    const withoutIds = withoutBody.data.showtimes.map((s) => s._id);
+    expect(withoutIds).toContain(showtime._id.toString());
+    expect(withoutIds).not.toContain(showtimeStarted._id.toString());
+
+    const withPast = await api(
+      `/api/showtimes?movie=${movie._id}&limit=50&includePast=true`,
+      { cookie: null }
+    );
+    expect(withPast.status).toBe(200);
+    const withBody = await withPast.json();
+    const withIds = withBody.data.showtimes.map((s) => s._id);
+    expect(withIds).toContain(showtime._id.toString());
+    expect(withIds).toContain(showtimeStarted._id.toString());
   });
 });
 

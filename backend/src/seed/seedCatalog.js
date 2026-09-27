@@ -8,6 +8,7 @@ import { Showtime } from "../models/Showtime.js";
 import * as showtimeService from "../services/showtimeService.js";
 import { getMovieForSeed } from "../services/tmdbService.js";
 import { bootstrapEveryMovieInEveryCity } from "./bootstrapCityMap.js";
+import { zonedDateString, zonedDateTime, addDaysToDateString } from "../utils/timezone.js";
 
 // Old static demo titles being replaced by real TMDB data. Movies with real
 // bookings against them are deactivated instead of deleted (see below) —
@@ -275,9 +276,15 @@ const seedShowtimesForMovies = async (movieDocs, theaterDocs, screenDocs, movieC
         while (needed > 0 && attempts < MAX_SLOT_SEARCH_ATTEMPTS) {
           attempts += 1;
           const { dayOffset, hour } = nextSlot(screen._id.toString());
-          const startTime = new Date();
-          startTime.setDate(startTime.getDate() + dayOffset);
-          startTime.setHours(hour, 0, 0, 0);
+          // Anchored to the theater's own timezone, not the seed script's —
+          // setHours() here previously used the server's local clock, so the
+          // same seed run landed showtimes at different wall-clock times
+          // depending on the machine (dev in IST vs. Render in UTC).
+          const targetDate = addDaysToDateString(
+            zonedDateString(now, theater.timezone),
+            dayOffset
+          );
+          const startTime = zonedDateTime(targetDate, hour, theater.timezone);
 
           try {
             await showtimeService.createShowtime(SEED_ADMIN_USER, {
