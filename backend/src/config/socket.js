@@ -106,8 +106,6 @@ export const initSocket = async (httpServer) => {
   return io;
 };
 
-export const getIO = () => io;
-
 /** Closes the server and the adapter's own Redis connections. */
 export const closeSocket = async () => {
   if (io) await io.close();

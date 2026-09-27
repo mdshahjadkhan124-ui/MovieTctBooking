@@ -12,7 +12,6 @@ import { initSocket, emitSeatsUpdated, closeSocket } from "./socket.js";
 let redisClient;
 let serverA;
 let serverB;
-let urlA;
 let urlB;
 let ioB;
 
@@ -31,10 +30,12 @@ const connectClient = (url) =>
 beforeAll(async () => {
   redisClient = await connectRedis();
 
-  // Instance A: the one this process's emit helpers talk to.
+  // Instance A: the one this process's emit helpers talk to. Its URL is
+  // never needed — nothing connects a client to it directly — only the
+  // side effect of listen() (binding a port) matters here.
   serverA = http.createServer();
   await initSocket(serverA);
-  urlA = await listen(serverA);
+  await listen(serverA);
 
   // Instance B: a second, independent Socket.IO server sharing the same
   // Redis — standing in for a second Render instance.

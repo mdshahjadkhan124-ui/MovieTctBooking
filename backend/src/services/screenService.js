@@ -19,7 +19,8 @@ export const updateScreen = async (user, id, updates) => {
 
   // theater is intentionally not reassignable here — moving a screen to a
   // different theater would need its own ownership check on the target too.
-  const { layout, theater, ...rest } = updates;
+  // Destructured out purely to exclude it from `rest`, never read itself.
+  const { layout, theater: _theater, ...rest } = updates;
   Object.assign(screen, rest);
   if (layout) {
     screen.layout = { ...screen.layout.toObject(), ...layout };

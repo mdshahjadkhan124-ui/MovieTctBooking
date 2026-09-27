@@ -104,7 +104,10 @@ const api = (path, { method = "GET", body, cookie = authCookie } = {}) =>
       // state-changing requests (see middleware/csrf.js).
       "X-Requested-With": "XMLHttpRequest",
     },
-    body: body && JSON.stringify(body),
+    // Omitted entirely (not just undefined) when there's no body — a GET
+    // call with a `body` key present at all, even undefined, is what
+    // unicorn/no-invalid-fetch-options flags as a fetch misuse pattern.
+    ...(body && { body: JSON.stringify(body) }),
   });
 
 const seatRange = (row, from, to) =>

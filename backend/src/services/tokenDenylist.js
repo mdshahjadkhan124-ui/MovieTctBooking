@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { getRedisClient } from "../config/redis.js";
+import { AppError } from "../utils/AppError.js";
 
 // A JWT is self-contained: the server can't "delete" one, so logging out by
 // clearing the cookie only stops the browser from sending it — a copy taken
@@ -31,8 +32,29 @@ export const revokeToken = async (token) => {
   return true;
 };
 
-/** True if this token id was revoked (i.e. its owner logged out). */
+/**
+ * True if this token id was revoked (i.e. its owner logged out).
+ *
+ * Fails CLOSED: every authenticated request goes through this (see
+ * middleware/auth.js's `protect`), so if Redis can't be reached we genuinely
+ * don't know whether the token was revoked — defaulting to "not revoked"
+ * would let a logged-out or compromised session straight through. Refusing
+ * the request outright (503) is the safe failure mode; never assume false.
+ * Without this catch, the raw Redis rejection would reach the central error
+ * handler's generic 500 branch (errorHandler.js), which is still a refusal,
+ * just with a less honest status code and no indication it's transient.
+ */
 export const isTokenRevoked = async (jti) => {
   if (!jti) return false; // pre-denylist tokens: can't be revoked, only expire
-  return (await getRedisClient().exists(key(jti))) === 1;
+
+  try {
+    return (await getRedisClient().exists(key(jti))) === 1;
+  } catch (err) {
+    console.error("Redis error while checking token denylist:", err);
+    throw new AppError(
+      "Service temporarily unavailable",
+      503,
+      "SERVICE_UNAVAILABLE"
+    );
+  }
 };

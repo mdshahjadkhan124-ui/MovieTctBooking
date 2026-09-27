@@ -10,7 +10,11 @@ const duplicateKeyMessage = (err) => {
   return "Duplicate value";
 };
 
-export const errorHandler = (err, req, res, next) => {
+// `next` is never called — Express identifies error-handling middleware by
+// arity (exactly 4 declared params), not by name or usage, so it must stay
+// in the signature even unused, or this stops being recognized as an error
+// handler at all.
+export const errorHandler = (err, req, res, _next) => {
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({
       success: false,

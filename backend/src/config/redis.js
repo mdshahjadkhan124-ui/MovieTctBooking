@@ -16,3 +16,10 @@ export const getRedisClient = () => {
   }
   return client;
 };
+
+export const disconnectRedis = async () => {
+  if (!client) return;
+  await client.quit();
+  client = undefined;
+  console.log("Redis disconnected");
+};
