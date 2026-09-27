@@ -1,7 +1,6 @@
 import "dotenv/config";
 import mongoose from "mongoose";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { connectDB } from "../config/db.js";
 import { Movie } from "../models/Movie.js";
 import { Theater } from "../models/Theater.js";
 import { Screen } from "../models/Screen.js";
@@ -13,24 +12,29 @@ let movie1, movie2, movie3;
 let theater1, theater2, theater3;
 let screen1, screen2, screen3;
 let showtime1, showtime2, showtime3, showtime4;
-let baseline; // super_admin snapshot taken BEFORE this file's fixtures exist
+const runId = Date.now();
 const userId = new mongoose.Types.ObjectId();
 
 const superAdmin = { role: "super_admin" };
 const theaterAdminFor = (theaterId) => ({ role: "theater_admin", theater: theaterId });
 
 beforeAll(async () => {
-  await connectDB();
-
-  // The in-memory MongoDB (vitest.global-setup.js) is isolated from the real
-  // dev database, but it is shared by every test file in the run — other
-  // files' bookings can already be in it when this runs. A super_admin's
-  // view is deliberately global/unscoped, so its tests below compare against
-  // this pre-fixture baseline (delta, not an exact total) rather than
-  // assuming an empty collection. The theater_admin tests don't need this:
-  // they're scoped to theater ids that only exist in this file, so nothing
-  // else in the shared test DB can leak into them.
-  baseline = await analyticsService.getAnalytics(superAdmin);
+  // Its own DATABASE on the shared in-memory Mongo server, not the default
+  // one every other integration test file writes to (vitest.global-setup.js
+  // starts ONE Mongo for the whole run, and test files execute in parallel).
+  //
+  // A super_admin's view is deliberately global/unscoped, so this file's
+  // super_admin assertions are only meaningful over data that is entirely its
+  // own. They used to compare against a snapshot taken in beforeAll (a delta),
+  // which is race-prone by construction: any other file's confirmed bookings
+  // that appeared OR were deleted between the snapshot and the measurement
+  // silently changed the result — deltas of +1400, 550 and -650 were all
+  // observed for a true answer of 750, i.e. the pipeline's arithmetic was
+  // exact and the measurement window was not. The same shared-data exposure
+  // applied to the top-movies ranking, a global top 5 that other files'
+  // bookings could crowd this file's movies out of. In a private database
+  // there is nothing to snapshot and nothing to race: the totals are exact.
+  await mongoose.connect(process.env.MONGO_URI, { dbName: `analytics_test_${runId}` });
 
   movie1 = await Movie.create({ title: "Analytics Movie 1", durationMinutes: 100 });
   movie2 = await Movie.create({ title: "Analytics Movie 2", durationMinutes: 110 });
@@ -70,16 +74,20 @@ afterAll(async () => {
   await Screen.deleteMany({ _id: { $in: [screen1._id, screen2._id, screen3._id] } });
   await Theater.deleteMany({ _id: { $in: [theater1._id, theater2._id, theater3._id] } });
   await Movie.deleteMany({ _id: { $in: [movie1._id, movie2._id, movie3._id] } });
+  await mongoose.connection.dropDatabase();
   await mongoose.disconnect();
 });
 
-describe("analyticsService (super_admin — global view, compared as a delta against the pre-fixture baseline)", () => {
+describe("analyticsService (super_admin — global view, over this file's own private database)", () => {
   it("sums confirmed revenue correctly and reports refunded/cancelled totals separately", async () => {
     const { revenue } = await analyticsService.getAnalytics(superAdmin);
-    expect(revenue.confirmedRevenue - baseline.revenue.confirmedRevenue).toBe(100 + 150 + 200 + 300);
-    expect(revenue.confirmedCount - baseline.revenue.confirmedCount).toBe(4);
-    expect(revenue.cancelledCount - baseline.revenue.cancelledCount).toBe(1);
-    expect(revenue.totalRefunded - baseline.revenue.totalRefunded).toBe(40);
+    // Exact totals, not deltas: the four fixture confirmed bookings are the
+    // only confirmed bookings in this database (the peak-hours bookings are
+    // created later, inside that test's own body).
+    expect(revenue.confirmedRevenue).toBe(100 + 150 + 200 + 300);
+    expect(revenue.confirmedCount).toBe(4);
+    expect(revenue.cancelledCount).toBe(1);
+    expect(revenue.totalRefunded).toBe(40);
   });
 
   it("orders top movies by booking count, then revenue as a tiebreaker (filtered to this file's own movies)", async () => {

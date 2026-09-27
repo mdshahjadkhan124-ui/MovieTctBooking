@@ -44,14 +44,20 @@ beforeAll(async () => {
     createRateLimiter({ windowMs: 60_000, max: 2, prefix: `rl:test-strict:${testRunId}:` }),
     (req, res) => res.json({ ok: true })
   );
-  testApp.use(createRateLimiter({ windowMs: 60_000, max: 3, prefix: `rl:test-limited:${testRunId}:` }));
-  testApp.post("/limited", (req, res) => res.json({ ok: true }));
 
   // A store that fails exactly the way a real one does mid-outage (see
   // rateLimiters.js's own reasoning for why this fails open) — deterministic
   // and isolated: it never touches the real Redis connection every other
   // test in this file still needs working, and the failure fires on every
   // single call rather than depending on real network timing.
+  //
+  // Registered BEFORE the blanket testApp.use() below, for the same reason as
+  // /strict: anything registered after it also passes through the blanket
+  // limiter, whose per-IP counter earlier tests in this file have already
+  // exhausted. Registered after it, this route's requests were answered by
+  // that blanket limiter with real 429s (RateLimit-Limit: 3, its own max)
+  // and never reached the failing store at all — so the test observed real
+  // rate limiting, not the outage path it exists to check.
   const alwaysFailingStore = {
     increment: async () => {
       throw new Error("simulated Redis outage");
@@ -69,6 +75,9 @@ beforeAll(async () => {
     }),
     (req, res) => res.json({ ok: true })
   );
+
+  testApp.use(createRateLimiter({ windowMs: 60_000, max: 3, prefix: `rl:test-limited:${testRunId}:` }));
+  testApp.post("/limited", (req, res) => res.json({ ok: true }));
 
   testServer = http.createServer(testApp);
   await new Promise((resolve) => testServer.listen(0, resolve));
