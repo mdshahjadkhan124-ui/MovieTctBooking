@@ -113,7 +113,9 @@ The movie catalog is real data (titles, posters, cast, ratings, certification) f
 | Payments | Stripe (test mode), webhook-driven commit |
 | Real-time | Socket.io |
 | Auth | JWT (httpOnly cookies) + bcrypt, role-based access control |
-| Testing | Vitest — 158 backend tests, split into a secretless `unit` project and an `integration` project; isolated in-memory MongoDB (`mongodb-memory-server`), real Upstash Redis + Stripe test-mode for the integration suites |
+| Testing | Vitest — 204 backend tests, split into a secretless `unit` project and an `integration` project; isolated in-memory MongoDB (`mongodb-memory-server`) + a Redis kept separate from production for the integration suites |
+| Linting | oxlint, both apps |
+| CI | GitHub Actions — lint + unit tests (backend), lint + build + tests (frontend), on every push/PR to `main` |
 | Infra | Vercel (frontend), Render (backend), MongoDB Atlas, Upstash Redis |
 
 ---
@@ -133,27 +135,59 @@ Theater ──< Screen ──< Showtime >── Movie
 
 - `Screen` references `Theater` (a theater has many screens); `Showtime` references `Screen` and `Movie` (a screen hosts many showtimes over time). `Booking` references `Showtime`, `Theater`, and `User` directly — `Theater` is denormalized onto `Booking` at creation specifically so every analytics pipeline can scope by theater with a single-field `$match`, with no extra `$lookup` hop needed just to find out which theater a booking belongs to.
 
-### Key design decisions
+### Architecture decisions
 
 - **References vs. embedding.** `Screen` is its own top-level collection (many showtimes reference the same screen over time — embedding it in `Showtime` would duplicate the whole seat layout on every single showtime document). The seat **layout itself** (`rows`, `columns`, `seatCategories`, `unavailableSeats`) is embedded *inside* `Screen`, because it's never queried independently of its screen — there's no use case for "find all layouts" separate from "find this screen's layout."
 - **Seat layout as config, not one document per seat.** A screen's layout is a compact config object, not 200 individual `Seat` documents. The recommendation engine and pricing logic both work off an in-memory grid built fresh from that config (`buildSeatGrid`) — generating a 200-seat grid from a dozen config fields is cheap, and it means there's nothing to keep in sync between a `Seat` collection and reality.
 - **A single source of truth for seat availability.** "Is this seat takeable right now?" is always the union of *active Redis locks* (temporary holds) and *confirmed bookings* (permanent) — computed fresh in one place (`getUnavailableSeatIds`) and reused for the seat grid, the price calculation, the `/locks` endpoint, and the broadcast payload. Nothing else is allowed to independently decide what counts as "unavailable."
+- **Two-layer seat lock.** Redis's atomic `SET NX PX` (via a Lua script) is the fast path that makes two simultaneous lock attempts resolve to exactly one winner in normal operation. A unique **partial** index on `Booking { showtime, seatIds }`, filtered to `status: "confirmed"`, is the DB-level backstop for the one race Redis alone can't close: a lock expiring in the exact gap between the webhook verifying ownership and writing `confirmed`. Redis makes the race vanishingly unlikely; the index makes double-selling a seat structurally impossible regardless.
+- **Stripe webhook routing, not just signature verification.** The webhook route is registered before `express.json()` (so Stripe's raw body survives intact for signature checking) and — as a direct consequence of *where* it's mounted, not a special-cased exemption — before the CSRF guard and the rate limiter too. Stripe's own servers can't send a browser's CSRF header or benefit from being throttled like a browser client, so the route being first in the middleware chain is what makes it reachable at all, by construction rather than by a bypass list someone has to remember to keep in sync.
 - **Seed-time vs. runtime external API calls.** TMDB is called only from the seed script, never from a request handler — see the TMDB section above. This is a deliberate boundary: seed scripts are allowed to be slow and retry-heavy; the live app is not allowed to depend on a third party's uptime to serve a movie listing.
+- **Codegen + parity tests instead of a shared package.** `buildSeatGrid` and the refund tiers exist in both apps because the frontend deploys from `frontend/` and the backend from `backend/` — neither build can import across that boundary, and a monorepo workspace package would mean coordinating two independent deploy pipelines just to publish one internal dependency. The backend owns the logic; `npm run sync:shared` regenerates the frontend's copy, and parity tests fail loudly the moment the two ever diverge — the discipline a shared package would enforce automatically, done explicitly instead.
+- **Coherent behavior across a Redis outage.** The rate limiter, the session-revocation check, and logout all depend on Redis, and a real outage doesn't ask which one you'd prefer to fail — so all three were decided together as one policy, not patched independently as each was noticed. Auth (session revocation + logout) fails **closed** with 503: it's an authentication decision, and failing open would let a logged-out or compromised session keep acting as its owner. The rate limiter fails **open**, loudly logged: it's a request-count throttle, not an authorization decision, and taking the entire API down for a transient blip is a worse trade than briefly unthrottled traffic.
+- **`isSeedDemo` as a structurally, not just conventionally, unforgeable boundary.** The obvious way to tell a demo account from a real one — an email pattern — isn't a security boundary at all: nothing reserves that domain, so a real signup could register the exact same address. `isSeedDemo` is a field no request body can ever set, verified by tracing every user-creation path down to where it explicitly whitelists which fields it reads — not by trusting that no one would think to try.
+
+---
+
+## ⚠️ Known Limitations
+
+Scope boundaries decided on purpose, not gaps found by accident:
+
+- **The QR e-ticket is display-only.** It encodes the booking for viewing/presenting at the venue; there's no scan/check-in endpoint that validates it or marks a ticket as used. Adding one is a well-defined next feature, not a fix to something broken.
+- **Waitlist offers are WebSocket-only.** A notified user who's offline when their offer goes out has no other channel (email/SMS/push) to learn about it before the hold expires and it cascades to the next person in line.
+- **List endpoints cap at 100 items, with no "Load more" UI.** The API's pagination ceiling (`MAX_PAGE_SIZE`) exists and is enforced; the frontend doesn't yet expose a way to page past the first batch anywhere it might matter (e.g. a very long booking history).
+- **Analytics peak-hour bucketing assumes a single timezone.** Every theater in this deployment is in India, so bucketing "what hour was this booked" in one fixed zone (`Asia/Kolkata`) is correct today; a deployment spanning multiple timezones would need per-theater bucketing, not a single default.
+- **A refund stuck in `refundStatus: "pending"` has no background reaper.** It resolves the next time the user acts on that booking again or Stripe redelivers the webhook — both already idempotent and safe to retry — but nothing proactively sweeps and retries a stuck refund on a timer the way the waitlist sweeper does for expired holds.
+- **No schema migration tooling.** Indexes are declared in the Mongoose schemas and rely on `autoIndex` to create them; there's no versioned migration runner for reshaping existing documents if a schema changes under live data.
+- **`seed:refresh` yields to real use, by design.** It rolls a demo-only showtime forward to keep a deployment perpetually "upcoming," but never touches one with even a single real (non-`isSeedDemo`) booking against it. The trade-off: once real activity touches a showtime, it stops being refreshed — a live deployment's actually-used showtimes will naturally age out of "upcoming" over time, same as any real booking system's would.
+- **Rate limiting fails open; auth fails closed.** This is a deliberate split, not an inconsistency (see [Architecture decisions](#architecture-decisions) above) — but it does mean a Redis outage silently disables the API's anti-abuse throttling (loudly logged, never silently) for its duration, in exchange for the API staying reachable at all.
+- **The demo users' email-based find-or-create is not the security boundary — `isSeedDemo` is.** `seed:analytics-demo` still looks up its 5 accounts by a fixed email pattern before falling back to creating them, and that lookup alone can't tell a real account from a demo one (nothing reserves the domain). This is a pre-existing characteristic of that lookup, not something this fixes: the boundary anything security-relevant actually checks is the `isSeedDemo` field, set only by that script's own code, never by a request.
 
 ---
 
 ## ✅ Testing
 
-**158 backend tests, all passing**, split into two Vitest projects:
+**204 backend tests, all passing**, split into two Vitest projects:
 
-- **`npm run test:unit`** — 69 pure-logic tests (recommendation engine, pricing, refund policy, seat grid, timezone, pagination) in well under a second, with **no database, no Redis, no Stripe and no secrets**. A fresh clone or a CI job without credentials can run these.
-- **`npm run test:integration`** — everything that's only meaningful against the real thing: seat-locking races, webhook idempotency, refund behaviour, analytics aggregation.
+- **`npm run test:unit`** — 78 pure-logic tests (recommendation engine, pricing, refund policy, seat grid, timezone, pagination, the `User` schema's conditional validation) in well under a second, with **no database, no Redis, no Stripe and no secrets**. A fresh clone or a CI job without credentials can run these — this is the project CI actually runs (see [CI](#-ci) below).
+- **`npm run test:integration`** — everything that's only meaningful against the real thing: seat-locking races, webhook idempotency, refund behaviour, analytics aggregation, cross-theater authorization. Needs a real Mongo (an isolated in-memory instance is spun up automatically — see below), a real Redis, and Stripe test-mode keys, so it isn't run in CI.
+
+### Running the integration suite locally: it needs its own Redis
+
+The integration suite writes real seat locks and JWT revocation keys, so it refuses to run against whatever `REDIS_URL` points at — it needs a **separate** Redis, set via `TEST_REDIS_URL`. Leave it blank and it falls back to `redis://127.0.0.1:6379`:
+
+```bash
+docker run -d --name redis -p 6379:6379 redis:7
+cd backend && npm run test:integration
+```
+
+If `TEST_REDIS_URL` isn't set and nothing is listening on 6379, the suite fails loudly at startup with the exact fix (rather than quietly running against production Redis, or quietly passing while doing nothing): `vitest.global-setup.js` also refuses to start if the test Redis and `REDIS_URL` ever resolve to the *same* host/port/database — note that a different database *number* on the same host isn't a valid way to separate them either, since Upstash supports only database 0. `npm run test:unit` needs none of this — no Mongo, Redis, Stripe, or secrets at all.
 
 The integration suites deliberately run against **real Redis (Upstash) and Stripe's real test-mode API** rather than mocks: a mocked integration test can pass while the real integration is broken (a Redis command that doesn't do quite what you assumed, a Stripe webhook payload shape that changed). Stripe is only stubbed where it *isn't* the subject — cancellation tests about ownership, refund windows or the database's uniqueness guard build a confirmed booking directly instead of paying for a real card charge to prove a policy rule. Every path where money actually moves still goes through Stripe end-to-end.
 
 **Duplicated logic is guarded by parity tests.** `buildSeatGrid` and the refund tiers exist in both apps (the frontend deploys from `frontend/`, the backend from `backend/`, so neither build can import the other's files). The backend owns them, `npm run sync:shared` regenerates the frontend copy, and tests import *both* implementations and fail if they ever diverge — including that the UI's quoted refund matches the server's to the rupee, so a user can never be shown one number and paid another.
 
-MongoDB is the one exception, and it's isolated on purpose: every test run spins up a fresh **in-memory MongoDB** (`mongodb-memory-server`, wired in via a Vitest `globalSetup`) instead of connecting to the shared dev database. That fixed a real, previously-flaky test: an analytics query asserting "my 3 low-volume fixture movies rank in the global top-N" would eventually fail on its own as real seed data grew and crowded them out of the ranking — not a bug in the app, but the test wasn't isolated. An in-memory instance sidesteps that permanently without weakening the assertion, and as a side effect, running `npm test` locally needs no real `MONGO_URI` at all.
+MongoDB is fully isolated, on purpose: every test run spins up a fresh **in-memory MongoDB** (`mongodb-memory-server`, wired in via a Vitest `globalSetup`) instead of connecting to the shared dev database. That fixed a real, previously-flaky test: an analytics query asserting "my 3 low-volume fixture movies rank in the global top-N" would eventually fail on its own as real seed data grew and crowded them out of the ranking — not a bug in the app, but the test wasn't isolated. An in-memory instance sidesteps that permanently without weakening the assertion, and as a side effect, running `npm test` locally needs no real `MONGO_URI` at all. Redis gets the same treatment via `TEST_REDIS_URL` (see above) — the same global setup refuses to start if it isn't genuinely separate from whatever `REDIS_URL` points at.
 
 | Area | Coverage |
 |---|---|
@@ -164,7 +198,10 @@ MongoDB is the one exception, and it's isolated on purpose: every test run spins
 | Waitlist | Join/leave/duplicate prevention, FIFO with skip-ahead, cancellation-driven notification, hold-expiry cascade to the next user |
 | Dynamic pricing | Every multiplier tier (occupancy, position, time-of-day) in isolation and combined |
 | Analytics | Aggregation pipeline correctness, role-scoping (a `theater_admin` never sees another theater's data) |
-| Security hardening | Rate limiting (429s, headers, route-order exemptions), **NoSQL injection sanitization**, security headers |
+| Cross-theater authorization | A `theater_admin` for one theater cannot read, update, delete, or create against another theater's screens or showtimes, and can't widen a listing via a query filter |
+| Past showtimes | Locking and checkout both reject an already-started showtime; public listings exclude one by default and include it with `includePast=true` |
+| Security hardening | Rate limiting (429s, headers, route-order exemptions, **fails open with a loud log on a Redis outage**), session revocation on logout (a stolen cookie stops working immediately; another session of the same user is unaffected), **NoSQL injection sanitization**, security headers |
+| Redis-outage behavior | Auth (session-revocation check + logout) fails **closed** with 503; the rate limiter fails **open** — verified end-to-end against a real Redis connection severed mid-request, not mocked |
 
 Run the suite:
 ```bash
@@ -174,11 +211,24 @@ npm test
 
 ---
 
+## 🤖 CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request to `main`, as two independent jobs, both on the Node version pinned in `.nvmrc`:
+
+| Job | Steps |
+|---|---|
+| `backend` | `npm ci` → `npm run lint` → `npm run test:unit` |
+| `frontend` | `npm ci` → `npm run lint` → `npm run build` → `npm test` |
+
+The backend job deliberately runs only the secretless `unit` project, not `test:integration` — CI provisions no Redis and no Stripe keys, and isn't meant to (see [Running the integration suite locally](#running-the-integration-suite-locally-it-needs-its-own-redis) above for how those actually get exercised).
+
+---
+
 ## 💻 Local Setup
 
 ### Prerequisites
-- Node.js 18+
-- A MongoDB connection string (Atlas or local)
+- Node.js — the version pinned in [`.nvmrc`](.nvmrc) (currently 24; also what CI uses). `nvm use` picks it up automatically.
+- A MongoDB connection string (Atlas or local) — not needed just to run the test suite, see [Tests](#tests) below
 - A Redis connection string (Upstash or local — use `rediss://` for TLS providers)
 - A Stripe account (test mode) for `STRIPE_SECRET_KEY` / webhook testing via the Stripe CLI
 - (Optional) A TMDB v4 read access token, only needed to run the catalog seed script
@@ -193,7 +243,9 @@ npm run seed:catalog   # fetches real movies from TMDB + seeds theaters/screens/
 npm run dev
 ```
 
-Optional: `npm run seed:analytics-demo` backfills realistic historical bookings so the admin analytics dashboard has something to show instead of empty charts.
+Optional, once there's a catalog to work with:
+- `npm run seed:analytics-demo` backfills realistic historical bookings, under 5 synthetic accounts (`isSeedDemo: true`), so the admin analytics dashboard has something to show instead of empty charts.
+- `npm run seed:refresh` reschedules showtimes onto the next 7 days (preserving each one's own time-of-day) so a demo deployment never ages into "everything already happened." It's safe to re-run — and safe to run against a database with real activity: it never touches a showtime that has even one booking from a real (non-`isSeedDemo`) user, checked via that same flag rather than the demo accounts' email pattern, since nothing reserves that email domain from a real signup. A cron hitting this periodically is what keeps the live deployment's catalog perpetually "upcoming."
 
 All required/optional env vars are documented inline in [`backend/.env.example`](backend/.env.example).
 
@@ -207,12 +259,17 @@ npm run dev
 
 ### Tests
 ```bash
-cd backend && npm test             # all 158 backend tests
-cd backend && npm run test:unit    # 69 pure-logic tests, ~0.6s, no DB/Redis/Stripe/secrets
-cd frontend && npm test    # frontend unit tests (seat grid construction)
+cd backend && npm run lint          # oxlint, 0 warnings
+cd backend && npm run test:unit     # 78 pure-logic tests, well under a second, no DB/Redis/Stripe/secrets
+cd backend && npm run test:integration   # needs its own Redis — see below — plus Stripe test-mode keys
+cd backend && npm test              # both projects, 204 tests total
+
+cd frontend && npm run lint         # oxlint, 0 warnings
+cd frontend && npm run build        # production build
+cd frontend && npm test             # frontend unit tests (seat grid construction, list-merge logic)
 ```
 
-Backend tests run against an isolated, in-memory MongoDB spun up automatically — no real `MONGO_URI` needed just to run `npm test` (see the Testing section above for why).
+Backend tests run against an isolated, in-memory MongoDB spun up automatically — no real `MONGO_URI` needed just to run any of them. The integration project additionally needs its own Redis, separate from whatever `REDIS_URL` points at — see [Running the integration suite locally](#running-the-integration-suite-locally-it-needs-its-own-redis) above for the one-line fix if you hit `Test Redis is unreachable`.
 
 ---
 
@@ -252,3 +309,9 @@ Set `NODE_ENV=production` on the backend — this switches the auth cookie to `s
 |---|---|
 | `VITE_API_BASE_URL` | Deployed backend URL + `/api`, e.g. `https://your-backend.onrender.com/api` |
 | `VITE_STRIPE_PUBLISHABLE_KEY` | `pk_test_...` or `pk_live_...` |
+
+---
+
+## 📄 License
+
+[MIT](LICENSE)

@@ -17,8 +17,8 @@
     "test:integration": "vitest run --project integration"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "MD SHAHJAD KHAN",
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",
