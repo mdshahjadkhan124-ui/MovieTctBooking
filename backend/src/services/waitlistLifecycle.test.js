@@ -286,29 +286,32 @@ describe("one freed seat, two waiting users", () => {
 // Two triggers at once (a cancellation racing the sweeper, or two cancellations)
 // --------------------------------------------------------------------------
 describe("concurrent processWaitlist calls", () => {
-  // KNOWN DEFECT, pinned with it.fails so the suite stays green while the
-  // problem is undecided — and so it turns RED the moment the defect is fixed,
-  // as the prompt to change `it.fails` to `it`.
+  // FORMERLY A KNOWN DEFECT (now fixed by acquireLocks' `reown: false` option
+  // — see its own doc comment and processWaitlist's call site).
   //
-  // What goes wrong: two triggers at once (a cancellation racing the sweeper,
-  // or two cancellations, or any lock release) both pick the same waiting user
-  // and both call acquireLocks for the same seats. The second call RE-OWNS the
-  // first's hold (same userId prefix — that path exists for "retry checkout
-  // after a declined card"), swapping in its own token. Only one call wins the
-  // Mongo claim; if it is the FIRST, the loser's cleanup
-  // (releaseLocksByToken(loserToken)) then deletes the seat's lock outright.
-  // Result: the entry says "notified" with a holdToken that is no longer in
-  // Redis. The user sees "Seats reserved for you", clicks Book Now, gets 409
-  // LOCKS_NOT_OWNED, and in the meantime anyone can take the seat — while the
-  // one-outstanding-offer rule keeps everyone behind them queued until the
-  // dead offer's window lapses.
+  // What used to go wrong: two triggers at once (a cancellation racing the
+  // sweeper, or two cancellations, or any lock release) both pick the same
+  // waiting candidate and both call acquireLocks for the same seats under
+  // that one candidate's userId. With reown left on (the default, correct
+  // for a human retrying checkout), the second call would silently RE-OWN
+  // the first call's just-taken hold under a fresh token. Only one call wins
+  // the Mongo claim; if it was the FIRST, the loser's cleanup
+  // (releaseLocksByToken(loserToken)) then deleted the seat's lock outright
+  // — because after the re-own, that token was the live one. Result: the
+  // entry said "notified" with a holdToken no longer in Redis. The user saw
+  // "Seats reserved for you", clicked Book Now, got 409 LOCKS_NOT_OWNED, and
+  // in the meantime anyone could take the seat — while the
+  // one-outstanding-offer rule kept everyone behind them queued until the
+  // dead offer's window lapsed.
   //
-  // Measured: 33/40 coincident pairs left an orphaned offer; every one of the
-  // orphaned offers failed checkout with LOCKS_NOT_OWNED and let a stranger
-  // lock the seat (18/20 in a separate run). Double offers do NOT happen — the
-  // Mongo claim is atomic — the damage is to the hold, not the queue.
-  it.fails("never double-offer and never leave an offer whose hold is missing from Redis", async () => {
-    for (let i = 0; i < 25; i++) {
+  // Measured before the fix: 33/40 coincident pairs left an orphaned offer;
+  // every orphaned offer failed checkout with LOCKS_NOT_OWNED and let a
+  // stranger lock the seat (18/20 in a separate run). Double offers never
+  // happened — the Mongo claim is atomic — the damage was to the hold, not
+  // the queue. With reown:false, the second call instead sees the seat as
+  // genuinely unavailable and cleanly does nothing.
+  it("never double-offers, never leaves an offer whose hold is missing from Redis, and the surviving offer can complete checkout", async () => {
+    for (let i = 0; i < 40; i++) {
       const showtime = await makeShowtime(screenSingle);
       const id = showtime._id.toString();
       const label = `iteration ${i} (${id})`;
@@ -324,21 +327,26 @@ describe("concurrent processWaitlist calls", () => {
 
       const entries = await WaitlistEntry.find({ showtime: id });
       const notified = entries.filter((e) => e.status === "notified");
-      expect(notified, label).toHaveLength(1);
+      expect(notified, label).toHaveLength(1); // exactly one live offer survives
       expect(notified[0].user.toString(), label).toBe(userA); // FIFO
       expect(entries.filter((e) => e.status === "waiting"), label).toHaveLength(1);
 
       // The invariant an offer must satisfy: the token stored on the entry IS
-      // the token currently holding its seats in Redis. If it is not, the user
-      // sees "reserved for you" but their checkout fails LOCKS_NOT_OWNED and
-      // the seat is up for grabs.
+      // the token currently holding its seats in Redis — no entry is left
+      // "notified" with a dead token.
       const { heldSeatIds, holdToken } = notified[0];
       expect(await seatLockService.verifyLockOwnership(id, heldSeatIds, holdToken), `${label}: hold missing`).toBe(true);
       expect(await seatLockService.getLockedSeatIds(id), label).toEqual(heldSeatIds);
-
       expect(emitWaitlistOffer, label).toHaveBeenCalledTimes(1);
+
+      // The winner can actually complete checkout with the surviving hold —
+      // not just "a token exists in Redis", but that it's usable end to end.
+      await expect(
+        bookingService.createCheckout(userA, id, heldSeatIds),
+        label
+      ).resolves.toMatchObject({ bookingId: expect.anything() });
     }
-  }, 60000);
+  }, 120000);
 });
 
 // --------------------------------------------------------------------------

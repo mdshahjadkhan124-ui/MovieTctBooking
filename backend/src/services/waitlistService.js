@@ -206,11 +206,16 @@ export const processWaitlist = async (showtimeId, { holdTtlMs = WAITLIST_HOLD_TT
   }
   if (!eligible) return;
 
+  // reown:false — see acquireLocks' own doc comment. This call's caller is
+  // the system (a cancellation, the sweeper, a manual release), not the
+  // candidate themselves, so a seat this exact userId already holds a live
+  // offer on (from a concurrent processWaitlist run picking the same
+  // candidate) must be treated as unavailable here, not silently taken over.
   const lockResult = await seatLockService.acquireLocks(
     showtimeId,
     offeredSeatIds,
     eligible.user.toString(),
-    { ttlMs: holdTtlMs }
+    { ttlMs: holdTtlMs, reown: false }
   );
   if (!lockResult.success) return; // lost a race for these seats — a later trigger will retry
 

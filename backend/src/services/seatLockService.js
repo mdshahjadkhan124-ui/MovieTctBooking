@@ -39,7 +39,8 @@ const generateToken = (userId) => `${ownerPrefix(userId)}${crypto.randomBytes(16
 // stops a lock that expires mid-check from being overwritten.
 // KEYS: [1] seat lock, [2] this showtime's seat index.
 // ARGV: [1] new token, [2] owner prefix, [3] lock TTL ms, [4] seat id,
-//       [5] index TTL ms.
+//       [5] index TTL ms, [6] "1" if re-owning an already-held seat is
+//       allowed, "0" if not (see acquireLocks' `reown` option).
 const ACQUIRE_OR_REOWN_SCRIPT = `
 local current = redis.call("GET", KEYS[1])
 if not current then
@@ -48,7 +49,7 @@ if not current then
   redis.call("PEXPIRE", KEYS[2], ARGV[5])
   return {1}
 end
-if string.sub(current, 1, string.len(ARGV[2])) == ARGV[2] then
+if ARGV[6] == "1" and string.sub(current, 1, string.len(ARGV[2])) == ARGV[2] then
   local remaining = redis.call("PTTL", KEYS[1])
   redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[3])
   redis.call("SADD", KEYS[2], ARGV[4])
@@ -140,8 +141,31 @@ const restoreIfOwner = async (showtimeId, seatId, token, previous) => {
  * `ttlMs` is overridable (defaulting to LOCK_TTL_MS) purely so tests can
  * verify expiry behavior without waiting out the real 7-minute TTL; callers
  * outside tests should never pass it.
+ *
+ * `reown` (default true) is what makes retry-after-declined-card work: a
+ * human resubmitting checkout for seats they already hold must re-acquire
+ * them rather than be told their own seats are "unavailable". That same
+ * silent takeover is wrong for waitlistService.processWaitlist's offer path,
+ * whose caller is the SYSTEM, not the seat's holder — two concurrent
+ * processWaitlist runs (a cancellation racing the sweeper, say) can both
+ * pick the same candidate and both call acquireLocks for the same seats
+ * under that one candidate's userId. With reown left on, the second call
+ * would silently re-own the first call's just-taken hold under a fresh
+ * token; whichever call then loses the Mongo "claim this offer" race
+ * releases what it thinks is its own token — which, after the re-own, was
+ * actually the winner's live hold — deleting it out from under an offer
+ * that's still shown to the user as active. Passing reown:false there
+ * instead makes the second call see the seat as genuinely unavailable (the
+ * first call's hold, not its own to take over), so it does nothing and
+ * `processWaitlist` cleanly no-ops on that seat this round — the correct
+ * outcome, since the seat already has a live offer on it.
  */
-export const acquireLocks = async (showtimeId, seatIds, userId, { ttlMs = LOCK_TTL_MS } = {}) => {
+export const acquireLocks = async (
+  showtimeId,
+  seatIds,
+  userId,
+  { ttlMs = LOCK_TTL_MS, reown = true } = {}
+) => {
   const client = getRedisClient();
   const token = generateToken(userId);
 
@@ -159,6 +183,7 @@ export const acquireLocks = async (showtimeId, seatIds, userId, { ttlMs = LOCK_T
         String(ttlMs),
         seatId,
         String(ttlMs + SET_TTL_BUFFER_MS),
+        reown ? "1" : "0",
       ],
     });
     if (ok === 1) {
