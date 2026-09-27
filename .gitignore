@@ -12,3 +12,6 @@ build/
 # not meant for recruiters browsing the public repo.
 MovieBooking-Interview-Prep.pdf
 *-Interview-Prep.pdf
+
+# Audit brief written for an external AI assistant; not part of the project.
+PROJECT_BRIEF.md

@@ -62,7 +62,7 @@ const assertIsolatedRedis = (testUrl, appUrl) => {
       "delete by pattern — they must not share a keyspace with a deployment.",
       "",
       "Fix by pointing TEST_REDIS_URL at a separate instance:",
-      "  - a local Redis (docker run -d -p 6379:6379 redis:7-alpine), or",
+      "  - a local Redis (docker run -d --name redis -p 6379:6379 redis:7), or",
       "  - a second free Upstash database (note: Upstash supports only db 0,",
       "    so a different database number on the same host is NOT an option —",
       "    it must be a different instance).",
@@ -93,7 +93,7 @@ const assertReachable = async (url) => {
           ? "TEST_REDIS_URL is set — check that instance is running and reachable."
           : [
               "TEST_REDIS_URL is not set, so the suite fell back to a local Redis.",
-              "Start one (docker run -d -p 6379:6379 redis:7-alpine) or set",
+              "Start one (docker run -d --name redis -p 6379:6379 redis:7) or set",
               "TEST_REDIS_URL to a separate instance. It must NOT be the same",
               "instance as REDIS_URL.",
             ].join("\n"),
