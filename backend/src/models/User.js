@@ -30,6 +30,14 @@ const userSchema = new mongoose.Schema(
     theater: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Theater",
+      // Required for theater_admin only — a plain user or a super_admin
+      // (global access, no single theater to assign) must remain valid with
+      // no theater. `function` (not an arrow) so `this` is the document
+      // being validated. See resolveTheaterScope, which stays as a runtime
+      // backstop even with this in place.
+      required: function () {
+        return this.role === "theater_admin";
+      },
     },
   },
   { timestamps: true }

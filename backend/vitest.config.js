@@ -19,6 +19,7 @@ const UNIT_TEST_FILES = [
   "src/utils/timezone.test.js",
   "src/utils/pagination.test.js",
   "src/seed/bootstrapCityMap.test.js",
+  "src/models/User.test.js",
 ];
 
 export default defineConfig({

@@ -94,12 +94,20 @@ describe("listTheaterAdmins", () => {
   });
 
   it("returns theater: null for a theater_admin with no theater assigned", async () => {
-    await User.create({
+    // theater is now required at the schema level for theater_admin (see
+    // User.js), so this shape can no longer be created through a normal,
+    // validated save — every real creation path is closed. It could still
+    // exist as a pre-existing/legacy document (written before that
+    // constraint existed, or inserted outside Mongoose), so
+    // listTheaterAdmins' null-safe rendering stays covered here by writing
+    // one directly, bypassing validation, rather than through User.create.
+    const unassignedManager = new User({
       name: "Unassigned Manager",
       email: "unassigned.authtest@example.com",
       password: "password123",
       role: "theater_admin",
     });
+    await unassignedManager.save({ validateBeforeSave: false });
 
     const { admins } = await authService.listTheaterAdmins({ limit: 100 });
     const unassigned = admins.find((admin) => admin.email === "unassigned.authtest@example.com");
